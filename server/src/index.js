@@ -165,6 +165,22 @@ const CATEGORY_QUERIES = {
 // API ENDPOINTS NGUỒN NHẠC YOUTUBE
 // ============================================================================
 
+app.get('/api/debug-ytdl', async (req, res) => {
+  const videoId = req.query.id || '3rHSLmNWC6s';
+  try {
+    const raw = await youtubedl(`https://www.youtube.com/watch?v=${videoId}`, {
+      getUrl: true,
+      format: 'bestaudio[ext=m4a]/bestaudio/best',
+      extractorArgs: 'youtube:player_client=ios,android,web',
+      noWarnings: true,
+      noCheckCertificates: true
+    });
+    res.json({ success: true, url: String(raw).slice(0, 150) });
+  } catch (err) {
+    res.json({ success: false, error: err.message, stderr: err.stderr, stdout: err.stdout });
+  }
+});
+
 app.get('/api/health', (_req, res) => res.json({ ok: true, name: 'NOCTRA YouTube Engine' }));
 
 // 1. Thư viện bài hát cá nhân
