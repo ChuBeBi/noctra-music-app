@@ -364,6 +364,7 @@ async function resolveDirectAudioUrl(videoId) {
     const raw = await youtubedl(`https://www.youtube.com/watch?v=${videoId}`, {
       getUrl: true,
       format: 'bestaudio[ext=m4a]/bestaudio/best',
+      extractorArgs: 'youtube:player_client=ios,android,web',
       noWarnings: true,
       noCheckCertificates: true
     });

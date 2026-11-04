@@ -796,21 +796,24 @@ export default function App() {
             </button>
           </div>
 
-          {/* LUỒNG ÂM THANH PHẦN CỨNG CHÍNH THỨC CỦA APPLE (PHÁT NỀN KHÓA MÀN HÌNH 100%) */}
-          <audio
-            ref={audioRef}
-            playsInline
-            preload="auto"
-            src={audioSrc}
-            onTimeUpdate={handleTimeUpdate}
-            onDurationChange={handleDurationChange}
-            onCanPlay={handleCanPlay}
-            onPlaying={handlePlaying}
-            onWaiting={handleWaiting}
-            onEnded={handleEnded}
-            onError={handleAudioError}
-            style={{ display: 'none' }}
-          />
+          {/* THANH PHÁT NHẠC GỐC PHẦN CỨNG IOS (BẮT BUỘC ĐỂ SAFARI KHÔNG ĐÓNG BĂNG KHI TẮT MÀN HÌNH) */}
+          <div style={styles.nativeAudioWrap}>
+            <audio
+              ref={audioRef}
+              controls
+              playsInline
+              preload="auto"
+              src={audioSrc}
+              onTimeUpdate={handleTimeUpdate}
+              onDurationChange={handleDurationChange}
+              onCanPlay={handleCanPlay}
+              onPlaying={handlePlaying}
+              onWaiting={handleWaiting}
+              onEnded={handleEnded}
+              onError={handleAudioError}
+              style={styles.nativeAudio}
+            />
+          </div>
         </section>
 
         {/* THANH TÌM KIẾM YOUTUBE OMNI-SEARCH */}
@@ -1518,6 +1521,22 @@ const styles = {
     padding: '3px 8px',
     borderRadius: 6,
     cursor: 'pointer'
+  },
+  nativeAudioWrap: {
+    marginTop: 10,
+    width: '100%',
+    borderRadius: 14,
+    overflow: 'hidden',
+    background: 'rgba(255, 255, 255, 0.04)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    padding: '2px 4px',
+    boxSizing: 'border-box'
+  },
+  nativeAudio: {
+    width: '100%',
+    height: 38,
+    outline: 'none',
+    display: 'block'
   },
   searchWrap: {
     marginBottom: 14
