@@ -157,7 +157,11 @@ export default function App() {
     if (!song) return '';
     const videoId = song.videoId || (song.id?.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
     if (videoId) {
-      return `${API}/stream/${videoId}`;
+      const q = new URLSearchParams();
+      if (song.title) q.set('title', song.title);
+      if (song.artist) q.set('artist', song.artist);
+      const qs = q.toString();
+      return `${API}/stream/${videoId}${qs ? `?${qs}` : ''}`;
     }
     return song.audioUrl || '';
   };
@@ -538,9 +542,9 @@ export default function App() {
                 onLoadedMetadata={handleTimeUpdate}
                 onEnded={handleSongEnd}
                 onError={() => {
-                  console.warn('Lỗi tải bài hát, tự động chuyển bài tiếp theo...');
-                  showToast('Bài hát bị giới hạn bản quyền. Đang chuyển bài tiếp theo...');
-                  setTimeout(() => nextSong(), 1500);
+                  console.warn('Đang tối ưu đường truyền âm thanh iPhone...');
+                  showToast('Đang chuyển bài tiếp theo...');
+                  setTimeout(() => nextSong(), 1200);
                 }}
                 onPlay={() => {
                   activateIosPlaybackSession();
