@@ -6,7 +6,6 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
-const ytdl = require('@distube/ytdl-core');
 const ytSearch = require('yt-search');
 
 const app = express();
@@ -373,6 +372,15 @@ async function resolveViaPiped(videoId) {
   return null;
 }
 
+let ytdlClient = null;
+async function getYtdl() {
+  if (!ytdlClient) {
+    const { Ytdl } = await import('@distube/ytdl-core');
+    ytdlClient = new Ytdl();
+  }
+  return ytdlClient;
+}
+
 async function resolveAudioStream(videoId) {
   const cached = streamMetaCache.get(videoId);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
@@ -380,9 +388,10 @@ async function resolveAudioStream(videoId) {
   }
 
   try {
+    const ytdl = await getYtdl();
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const info = await ytdl.getInfo(url);
-    const audioFormats = ytdl.filterFormats(info.formats, 'audioonly');
+    const audioFormats = info.formats?.filter((f) => f.hasAudio && !f.hasVideo) || [];
 
     // Ưu tiên itag 140 (AAC 128kbps m4a) chuẩn phần cứng Apple để iOS giải mã khi tắt màn hình
     const chosen =
@@ -402,7 +411,7 @@ async function resolveAudioStream(videoId) {
       return resolved;
     }
   } catch (err) {
-    console.warn(`ytdl warn (${videoId}): ${err.message}. Chuyển sang luồng dự phòng Piped...`);
+    console.warn(`ytdl error (${videoId}): ${err.message}`);
   }
 
   const piped = await resolveViaPiped(videoId);
@@ -419,54 +428,64 @@ async function resolveAudioStream(videoId) {
  * Bóc tách và truyền luồng âm thanh audio/mp4 hỗ trợ HTTP 206 Partial Content (Range header).
  * Safari trên iOS bắt buộc server phải hỗ trợ Range header thì mới cho phép phát tiếp khi tắt màn hình iPhone.
  */
+function proxyAudioStream(req, res, urlStr, mimeType, maxRedirects = 5) {
+  const targetUrl = new URL(urlStr);
+  const client = targetUrl.protocol === 'https:' ? https : http;
+  const agent = targetUrl.protocol === 'https:' ? httpsAgent : httpAgent;
+
+  const headers = {
+    'User-Agent':
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+    Accept: '*/*',
+    Connection: 'keep-alive'
+  };
+
+  if (req.headers.range) {
+    headers.Range = req.headers.range;
+  }
+
+  const proxyReq = client.get(targetUrl, { headers, agent }, (proxyRes) => {
+    if (proxyRes.statusCode && proxyRes.statusCode >= 300 && proxyRes.statusCode < 400 && proxyRes.headers.location && maxRedirects > 0) {
+      proxyRes.resume();
+      const nextUrl = new URL(proxyRes.headers.location, targetUrl).toString();
+      return proxyAudioStream(req, res, nextUrl, mimeType, maxRedirects - 1);
+    }
+
+    const responseHeaders = {
+      'Content-Type': mimeType || 'audio/mp4',
+      'Accept-Ranges': 'bytes',
+      'Access-Control-Allow-Origin': '*',
+      'Cache-Control': 'public, max-age=3600'
+    };
+
+    if (proxyRes.headers['content-length']) {
+      responseHeaders['Content-Length'] = proxyRes.headers['content-length'];
+    }
+    if (proxyRes.headers['content-range']) {
+      responseHeaders['Content-Range'] = proxyRes.headers['content-range'];
+    }
+
+    res.writeHead(proxyRes.statusCode || 200, responseHeaders);
+    proxyRes.pipe(res);
+  });
+
+  proxyReq.on('error', (err) => {
+    console.error('Lỗi kết nối luồng audio proxy:', err.message);
+    if (!res.headersSent) res.status(502).end();
+  });
+
+  req.on('close', () => {
+    proxyReq.destroy();
+  });
+}
+
 app.get('/api/stream/:idOrVideoId', async (req, res) => {
   let videoId = req.params.idOrVideoId;
   if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
 
   try {
     const streamInfo = await resolveAudioStream(videoId);
-    const targetUrl = new URL(streamInfo.url);
-    const client = targetUrl.protocol === 'https:' ? https : http;
-    const agent = targetUrl.protocol === 'https:' ? httpsAgent : httpAgent;
-
-    const headers = {
-      'User-Agent':
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
-      Accept: '*/*',
-      Connection: 'keep-alive'
-    };
-
-    if (req.headers.range) {
-      headers.Range = req.headers.range;
-    }
-
-    const proxyReq = client.get(targetUrl, { headers, agent }, (proxyRes) => {
-      const responseHeaders = {
-        'Content-Type': streamInfo.mimeType || 'audio/mp4',
-        'Accept-Ranges': 'bytes',
-        'Access-Control-Allow-Origin': '*',
-        'Cache-Control': 'public, max-age=3600'
-      };
-
-      if (proxyRes.headers['content-length']) {
-        responseHeaders['Content-Length'] = proxyRes.headers['content-length'];
-      }
-      if (proxyRes.headers['content-range']) {
-        responseHeaders['Content-Range'] = proxyRes.headers['content-range'];
-      }
-
-      res.writeHead(proxyRes.statusCode || 200, responseHeaders);
-      proxyRes.pipe(res);
-    });
-
-    proxyReq.on('error', (err) => {
-      console.error('Lỗi kết nối luồng audio proxy:', err.message);
-      if (!res.headersSent) res.status(502).end();
-    });
-
-    req.on('close', () => {
-      proxyReq.destroy();
-    });
+    proxyAudioStream(req, res, streamInfo.url, streamInfo.mimeType);
   } catch (err) {
     console.error(`Lỗi bóc tách luồng (${videoId}):`, err.message);
     res.status(500).json({ error: 'Không thể tải luồng âm thanh YouTube.' });
