@@ -2446,3 +2446,4 @@ writeFileEnsured('client/src/App.jsx', clientAppJsx);
 console.log('\n============================================================');
 console.log('✅ ĐÃ ÁP DỤNG BẢN FIX TRIỆT ĐỂ CHO IPHONE LOCK-SCREEN!');
 console.log('============================================================');
+
