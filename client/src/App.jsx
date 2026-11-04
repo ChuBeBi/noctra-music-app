@@ -75,6 +75,7 @@ export default function App() {
   loopModeRef.current = loopMode;
   const shuffleRef = useRef(shuffle);
   shuffleRef.current = shuffle;
+  const retryCountRef = useRef(0);
   const searchTimeoutRef = useRef(null);
   const progressBarRef = useRef(null);
 
@@ -199,6 +200,8 @@ export default function App() {
     if (!song) return;
     activateIosPlaybackSession();
     setCurrent(song);
+    retryCountRef.current = 0;
+    setLoadingTrack(true);
     setHistory((prev) => [song, ...prev.filter((s) => (s.videoId || s.id) !== (song.videoId || song.id))].slice(0, 50));
 
     const audio = audioRef.current;
@@ -717,12 +720,28 @@ export default function App() {
               playsInline
               preload="auto"
               onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleTimeUpdate}
+              onLoadedMetadata={() => {
+                handleTimeUpdate();
+                setLoadingTrack(false);
+              }}
+              onLoadedData={() => setLoadingTrack(false)}
+              onCanPlay={() => setLoadingTrack(false)}
+              onCanPlayThrough={() => setLoadingTrack(false)}
               onEnded={handleSongEnd}
               onError={() => {
-                console.warn('Đang tối ưu đường truyền âm thanh iPhone...');
-                showToast('Đang chuyển bài tiếp theo...');
-                setTimeout(() => nextSong(), 800);
+                if (retryCountRef.current < 2) {
+                  retryCountRef.current += 1;
+                  const vId = currentRef.current?.videoId || currentRef.current?.id;
+                  if (audioRef.current && vId) {
+                    audioRef.current.src = `${API}/stream/${vId}?r=${retryCountRef.current}`;
+                    audioRef.current.load();
+                    audioRef.current.play().catch(() => {});
+                  }
+                } else {
+                  retryCountRef.current = 0;
+                  showToast('Đang chuyển bài tiếp theo...');
+                  setTimeout(() => nextSong(), 500);
+                }
               }}
               onPlay={() => {
                 activateIosPlaybackSession();
@@ -732,7 +751,10 @@ export default function App() {
               }}
               onPause={() => setIsPlaying(false)}
               onWaiting={() => setLoadingTrack(true)}
-              onPlaying={() => setLoadingTrack(false)}
+              onPlaying={() => {
+                setLoadingTrack(false);
+                setIsPlaying(true);
+              }}
               style={styles.nativeAudioCapsule}
             />
           </section>
