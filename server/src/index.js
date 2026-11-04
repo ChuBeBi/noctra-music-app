@@ -524,9 +524,13 @@ app.get('/api/stream/:idOrVideoId', async (req, res) => {
   try {
     const directUrl = await resolveDirectAudioUrl(videoId);
     if (directUrl) {
-      return pipeAudioFromUrl(directUrl, req, res, () => {
-        if (!res.headersSent) res.status(502).json({ error: 'Direct audio stream error' });
-      });
+      if (req.query.pipe === '1') {
+        return pipeAudioFromUrl(directUrl, req, res, () => {
+          if (!res.headersSent) res.redirect(302, directUrl);
+        });
+      }
+      // Chuyển hướng 302 trực tiếp đến Google CDN (nhanh tức thì, không tắc nghẽn server)
+      return res.redirect(302, directUrl);
     }
     return res.status(404).json({ error: 'YouTube audio not found' });
   } catch (err) {

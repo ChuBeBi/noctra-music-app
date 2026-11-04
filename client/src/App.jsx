@@ -903,8 +903,25 @@ export default function App() {
               }
             }}
             onError={(e) => {
-              console.warn('Audio stream error:', e);
-              setLoadingTrack(false);
+              console.warn('Audio stream error, fetching direct audio-info fallback:', e);
+              if (currentRef.current) {
+                const vid = currentRef.current.videoId || (currentRef.current.id?.startsWith('yt-') ? currentRef.current.id.replace('yt-', '') : currentRef.current.id);
+                if (vid) {
+                  fetch(`${API}/audio-info/${vid}`)
+                    .then((r) => r.json())
+                    .then((data) => {
+                      if (data && data.url && audioRef.current && audioRef.current.src !== data.url) {
+                        audioRef.current.src = data.url;
+                        audioRef.current.load();
+                        audioRef.current.play().then(() => {
+                          setIsPlaying(true);
+                          setLoadingTrack(false);
+                        }).catch(() => {});
+                      }
+                    })
+                    .catch(() => {});
+                }
+              }
             }}
             style={{ display: 'none' }}
           />
