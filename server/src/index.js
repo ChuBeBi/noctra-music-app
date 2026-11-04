@@ -153,7 +153,7 @@ function extractPlaylistId(input = '') {
 }
 
 const CATEGORY_QUERIES = {
-  trending: 'nhac hot tiktok trending viet nam',
+  trending: 'nhac tre ballad acoustic hot trend viet nam',
   vpop: 'nhac tre vpop moi nhat',
   lofi: 'lofi chill tieng viet',
   acoustic: 'nhac acoustic viet nam nhe nhang',
@@ -485,11 +485,23 @@ app.get('/api/stream/:idOrVideoId', async (req, res) => {
 
   try {
     const streamInfo = await resolveAudioStream(videoId);
-    proxyAudioStream(req, res, streamInfo.url, streamInfo.mimeType);
+    return proxyAudioStream(req, res, streamInfo.url, streamInfo.mimeType);
   } catch (err) {
-    console.error(`Lỗi bóc tách luồng (${videoId}):`, err.message);
-    res.status(500).json({ error: 'Không thể tải luồng âm thanh YouTube.' });
+    console.warn(`Lỗi bóc tách luồng (${videoId}): ${err.message}. Đang thử luồng dự phòng...`);
   }
+
+  // Tự động chuyển tiếp sang bài thay thế nếu video này bị YouTube gỡ hoặc chặn bản quyền
+  const fallbackIds = ['m7Wya6Z-QdM', '5ZQ3tBBbyQU', 'D5foP85eMg8', 'jzRARRbRv4U'];
+  for (const altId of fallbackIds) {
+    if (altId !== videoId) {
+      try {
+        const altStream = await resolveAudioStream(altId);
+        return proxyAudioStream(req, res, altStream.url, altStream.mimeType);
+      } catch (_) {}
+    }
+  }
+
+  res.status(404).json({ error: 'Video YouTube này không khả dụng.' });
 });
 
 // Phục vụ giao diện tĩnh khi build production trên Render

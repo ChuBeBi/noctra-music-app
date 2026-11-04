@@ -537,6 +537,11 @@ export default function App() {
                 onTimeUpdate={handleTimeUpdate}
                 onLoadedMetadata={handleTimeUpdate}
                 onEnded={handleSongEnd}
+                onError={() => {
+                  console.warn('Lỗi tải bài hát, tự động chuyển bài tiếp theo...');
+                  showToast('Bài hát bị giới hạn bản quyền. Đang chuyển bài tiếp theo...');
+                  setTimeout(() => nextSong(), 1500);
+                }}
                 onPlay={() => {
                   activateIosPlaybackSession();
                   setIsPlaying(true);
