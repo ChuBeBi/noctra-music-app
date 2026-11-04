@@ -1,101 +1,199 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
+import {
+  AudioLines, Search, Heart, House, Library, Clock3, Plus, Play, Pause,
+  SkipBack, SkipForward, Shuffle, Repeat, Repeat1, MoreHorizontal, X, Youtube,
+  Headphones, Moon, ExternalLink, Check, Flame, Sparkles, Music, Radio,
+  Trash2, Maximize2, Minimize2, ListPlus, Loader2
+} from 'lucide-react';
 
-const API_BASE = (import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.origin.includes(':5173') ? 'http://localhost:5000/api' : '/api')).replace(/\/$/, '');
+const API = (import.meta.env.VITE_API_URL || (typeof window !== 'undefined' && window.location.origin.includes(':5173') ? 'http://localhost:5000/api' : '/api')).replace(/\/$/, '');
+
+const CATEGORIES = [
+  { id: 'trending', label: 'Thịnh hành', icon: Flame },
+  { id: 'vpop', label: 'V-Pop Hot', icon: Sparkles },
+  { id: 'lofi', label: 'Lofi Chill', icon: Moon },
+  { id: 'acoustic', label: 'Acoustic', icon: Music },
+  { id: 'sleep', label: 'Dễ ngủ', icon: Radio },
+  { id: 'remix', label: 'Remix TikTok', icon: Flame },
+];
+
+function getStored(key, fallback) {
+  try {
+    const value = localStorage.getItem(key);
+    if (!value) return fallback;
+    const parsed = JSON.parse(value);
+    return Array.isArray(fallback) ? (Array.isArray(parsed) ? parsed : fallback) : parsed;
+  } catch {
+    return fallback;
+  }
+}
+
+function formatTime(sec) {
+  if (!sec || Number.isNaN(sec)) return '0:00';
+  const m = Math.floor(sec / 60);
+  const s = Math.floor(sec % 60);
+  return `${m}:${s < 10 ? '0' : ''}${s}`;
+}
 
 export default function App() {
-  const [songs, setSongs] = useState([]);
-  const [currentIndex, setCurrentIndex] = useState(0);
+  // Navigation & Category states
+  const [activeTab, setActiveTab] = useState('trending');
+  const [categorySongs, setCategorySongs] = useState({});
+  const [librarySongs, setLibrarySongs] = useState([]);
+  const [searchResults, setSearchResults] = useState([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
+  const [loadingCategory, setLoadingCategory] = useState(false);
+
+  // Playback states
+  const [current, setCurrent] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
   const [loadingTrack, setLoadingTrack] = useState(false);
-  const [errorMsg, setErrorMsg] = useState('');
+  const [repeatMode, setRepeatMode] = useState('all'); // "off", "all", "one"
+  const [shuffle, setShuffle] = useState(false);
+  const [favorites, setFavorites] = useState(() => getStored('noctra-favorites', []));
+  const [history, setHistory] = useState(() => getStored('noctra-history', []));
 
-  // Form thêm bài hát
-  const [urlOrId, setUrlOrId] = useState('');
-  const [title, setTitle] = useState('');
-  const [artist, setArtist] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+  // UI Modals & Popups
+  const [showPlayer, setShowPlayer] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [addMode, setAddMode] = useState('single'); // "single" | "playlist"
+  const [addUrl, setAddUrl] = useState('');
+  const [addTitle, setAddTitle] = useState('');
+  const [addArtist, setAddArtist] = useState('');
+  const [submittingAdd, setSubmittingAdd] = useState(false);
+  const [notice, setNotice] = useState('');
 
-  // QUAN TRỌNG CHO iOS: Dùng duy nhất 1 thẻ <audio> xuyên suốt vòng đời ứng dụng.
-  // Khi màn hình iPhone tắt, iOS chỉ cho phép chuyển bài tự động nếu tái sử dụng cùng 1 thẻ <audio>.
+  // iOS HTML5 Audio & YouTube Player Refs
   const audioRef = useRef(null);
+  const playerRef = useRef(null);
+  const ytReady = useRef(false);
+  const useYtFallback = useRef(false);
 
-  const currentSong = songs[currentIndex] || null;
+  const searchTimeoutRef = useRef(null);
+  const currentRef = useRef(null);
+  currentRef.current = current;
+  const repeatModeRef = useRef(repeatMode);
+  repeatModeRef.current = repeatMode;
+  const shuffleRef = useRef(shuffle);
+  shuffleRef.current = shuffle;
 
-  const getPlayableUrl = (song) => {
-    if (!song) return '';
-    if (song.youtubeId) {
-      return `${API_BASE}/stream/${song.youtubeId}`;
-    }
-    return song.audioUrl || '';
-  };
+  // Sync to LocalStorage
+  useEffect(() => { localStorage.setItem('noctra-favorites', JSON.stringify(favorites)); }, [favorites]);
+  useEffect(() => { localStorage.setItem('noctra-history', JSON.stringify(history)); }, [history]);
 
-  useEffect(() => {
-    fetch(`${API_BASE}/songs`)
-      .then((r) => r.json())
+  // Load Saved Library
+  const loadLibrary = useCallback(() => {
+    fetch(`${API}/songs`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((data) => {
-        if (Array.isArray(data)) setSongs(data);
+        if (Array.isArray(data.songs)) setLibrarySongs(data.songs);
       })
-      .catch(() => {
-        setErrorMsg('Không kết nối được tới server API.');
-      });
+      .catch(() => {});
   }, []);
 
-  // Cập nhật thông tin lên Màn hình khóa iPhone & Dynamic Island / Control Center
-  const updateMediaSessionMetadata = (song) => {
-    if (!('mediaSession' in navigator) || !song) return;
+  useEffect(() => {
+    loadLibrary();
+  }, [loadLibrary]);
 
-    navigator.mediaSession.metadata = new MediaMetadata({
-      title: song.title || 'NOCTRA Music',
-      artist: song.artist || 'NOCTRA',
-      album: 'NOCTRA Background Audio',
-      artwork: [
-        {
-          src: song.thumbnail || 'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=512&q=80',
-          sizes: '512x512',
-          type: 'image/jpeg'
+  // Fetch Category Songs from YouTube on demand
+  const fetchCategorySongs = useCallback((catId) => {
+    if (categorySongs[catId]) return;
+    setLoadingCategory(true);
+    fetch(`${API}/trending?category=${catId}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((data) => {
+        if (Array.isArray(data.songs)) {
+          setCategorySongs((prev) => ({ ...prev, [catId]: data.songs }));
         }
-      ]
-    });
-  };
+      })
+      .catch(() => {
+        setNotice('Không thể tải nhạc từ YouTube, hãy kiểm tra kết nối mạng.');
+      })
+      .finally(() => setLoadingCategory(false));
+  }, [categorySongs]);
 
-  // Đăng ký các nút bấm trên màn hình khóa iPhone (Play, Pause, Next, Previous, Tua nhạc)
+  useEffect(() => {
+    const isCat = CATEGORIES.some((c) => c.id === activeTab);
+    if (isCat) {
+      fetchCategorySongs(activeTab);
+    }
+  }, [activeTab, fetchCategorySongs]);
+
+  // Active Song List based on Tab / Search
+  const currentSongList = useMemo(() => {
+    if (searchQuery.trim().length > 0) return searchResults;
+    if (activeTab === 'favorites') return favorites;
+    if (activeTab === 'history') return history;
+    if (activeTab === 'library') return librarySongs;
+    return categorySongs[activeTab] || [];
+  }, [searchQuery, searchResults, activeTab, favorites, history, librarySongs, categorySongs]);
+
+  // Fallback YouTube IFrame Player (khi video không thể tách audio)
+  useEffect(() => {
+    const initYt = () => {
+      if (!window.YT || !window.YT.Player) return;
+      if (playerRef.current) return;
+      playerRef.current = new window.YT.Player('yt-fallback-player', {
+        width: '1',
+        height: '1',
+        videoId: 'jfKfPfyJRdk',
+        playerVars: { playsinline: 1, controls: 0, rel: 0, enablejsapi: 1 },
+        events: {
+          onReady: () => { ytReady.current = true; },
+          onStateChange: (e) => {
+            if (e.data === window.YT.PlayerState.PLAYING) setIsPlaying(true);
+            if (e.data === window.YT.PlayerState.PAUSED) setIsPlaying(false);
+            if (e.data === window.YT.PlayerState.ENDED) handleSongEnd();
+          }
+        }
+      });
+    };
+
+    if (!window.YT) {
+      const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+      if (!existing) {
+        const tag = document.createElement('script');
+        tag.src = 'https://www.youtube.com/iframe_api';
+        document.head.appendChild(tag);
+      }
+      const prev = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = () => { prev?.(); initYt(); };
+    } else {
+      initYt();
+    }
+  }, []);
+
+  // iPhone iOS MediaSession API Support for Background & Lock Screen Controls
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
 
+    if (current) {
+      navigator.mediaSession.metadata = new window.MediaMetadata({
+        title: current.title,
+        artist: current.artist,
+        album: 'NOCTRA YouTube Music',
+        artwork: [
+          { src: current.cover, sizes: '512x512', type: 'image/jpeg' }
+        ]
+      });
+    }
+
+    navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+
     const actions = [
-      ['play', () => playAudio()],
-      ['pause', () => pauseAudio()],
-      ['previoustrack', () => handlePrev()],
-      ['nexttrack', () => handleNext()],
+      ['play', () => togglePlay()],
+      ['pause', () => togglePlay()],
+      ['previoustrack', () => previousSong()],
+      ['nexttrack', () => nextSong()],
       [
         'seekto',
         (details) => {
           if (audioRef.current && details.seekTime != null) {
             audioRef.current.currentTime = details.seekTime;
             setCurrentTime(details.seekTime);
-          }
-        }
-      ],
-      [
-        'seekbackward',
-        (details) => {
-          if (audioRef.current) {
-            const offset = details.seekOffset || 10;
-            audioRef.current.currentTime = Math.max(0, audioRef.current.currentTime - offset);
-          }
-        }
-      ],
-      [
-        'seekforward',
-        (details) => {
-          if (audioRef.current) {
-            const offset = details.seekOffset || 10;
-            audioRef.current.currentTime = Math.min(
-              audioRef.current.duration || 0,
-              audioRef.current.currentTime + offset
-            );
           }
         }
       ]
@@ -106,190 +204,221 @@ export default function App() {
         navigator.mediaSession.setActionHandler(action, handler);
       } catch (_) {}
     }
-  }, [songs, currentIndex]);
+  }, [current, isPlaying]);
 
-  // Khi đổi bài hát
-  useEffect(() => {
-    const audio = audioRef.current;
-    if (!audio || !currentSong) return;
-
-    const nextSrc = getPlayableUrl(currentSong);
-    if (!nextSrc) return;
-
-    setErrorMsg('');
-    updateMediaSessionMetadata(currentSong);
-
-    if (audio.src !== nextSrc) {
-      audio.src = nextSrc;
-      audio.load();
+  // Live YouTube Search
+  const handleSearchChange = (text) => {
+    setSearchQuery(text);
+    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
+    if (!text.trim()) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
     }
 
-    if (isPlaying) {
+    setIsSearching(true);
+    searchTimeoutRef.current = setTimeout(() => {
+      fetch(`${API}/search?q=${encodeURIComponent(text.trim())}`)
+        .then((r) => (r.ok ? r.json() : Promise.reject()))
+        .then((data) => {
+          setSearchResults(Array.isArray(data.songs) ? data.songs : []);
+        })
+        .catch(() => {})
+        .finally(() => setIsSearching(false));
+    }, 400);
+  };
+
+  // Play Song via HTML5 Audio Stream (chạy ngầm iPhone) hoặc fallback
+  const playSong = useCallback((song) => {
+    if (!song) return;
+    setCurrent(song);
+    setHistory((prev) => [song, ...prev.filter((s) => (s.videoId || s.id) !== (song.videoId || song.id))].slice(0, 50));
+
+    const audio = audioRef.current;
+    if (audio) {
+      useYtFallback.current = false;
+      const streamUrl = song.audioUrl || (song.videoId ? `${API}/stream/${song.videoId}` : '');
+
       setLoadingTrack(true);
+      audio.src = streamUrl;
+      audio.load();
       audio
         .play()
         .then(() => {
+          setIsPlaying(true);
           setLoadingTrack(false);
-          if ('mediaSession' in navigator) {
-            navigator.mediaSession.playbackState = 'playing';
-          }
         })
         .catch((err) => {
-          console.warn('Autoplay chờ thao tác chạm từ người dùng:', err.message);
+          console.warn('Audio play error, chuyển sang chế độ dự phòng:', err.message);
           setLoadingTrack(false);
+          // Fallback sang YouTube IFrame nếu trình phát audio bị chặn
+          if (song.videoId && playerRef.current?.loadVideoById) {
+            useYtFallback.current = true;
+            playerRef.current.loadVideoById(song.videoId);
+            setIsPlaying(true);
+          }
         });
     }
-  }, [currentIndex, currentSong?.id]);
-
-  const playAudio = async () => {
-    const audio = audioRef.current;
-    if (!audio || !currentSong) return;
-
-    setErrorMsg('');
-    if (!audio.src) {
-      audio.src = getPlayableUrl(currentSong);
-    }
-
-    try {
-      setLoadingTrack(true);
-      await audio.play();
-      setIsPlaying(true);
-      setLoadingTrack(false);
-      updateMediaSessionMetadata(currentSong);
-      if ('mediaSession' in navigator) {
-        navigator.mediaSession.playbackState = 'playing';
-      }
-    } catch (err) {
-      setLoadingTrack(false);
-      setIsPlaying(false);
-      setErrorMsg('Không thể phát luồng âm thanh này. Hãy thử bài có sẵn hoặc dán link MP3/M4A.');
-    }
-  };
-
-  const pauseAudio = () => {
-    const audio = audioRef.current;
-    if (!audio) return;
-    audio.pause();
-    setIsPlaying(false);
-    if ('mediaSession' in navigator) {
-      navigator.mediaSession.playbackState = 'paused';
-    }
-  };
+  }, []);
 
   const togglePlay = () => {
+    if (!current) {
+      if (currentSongList.length > 0) playSong(currentSongList[0]);
+      return;
+    }
+
+    if (useYtFallback.current && playerRef.current) {
+      if (isPlaying) {
+        playerRef.current.pauseVideo();
+        setIsPlaying(false);
+      } else {
+        playerRef.current.playVideo();
+        setIsPlaying(true);
+      }
+      return;
+    }
+
+    const audio = audioRef.current;
+    if (!audio) return;
     if (isPlaying) {
-      pauseAudio();
+      audio.pause();
+      setIsPlaying(false);
     } else {
-      playAudio();
+      audio.play().then(() => setIsPlaying(true)).catch(() => {});
     }
   };
 
-  const handleNext = () => {
-    if (!songs.length) return;
-    const nextIdx = (currentIndex + 1) % songs.length;
-    setCurrentIndex(nextIdx);
-    setIsPlaying(true);
-  };
+  const nextSong = useCallback(() => {
+    const list = currentSongList;
+    if (!list.length) return;
+    if (shuffleRef.current) {
+      const randomIndex = Math.floor(Math.random() * list.length);
+      playSong(list[randomIndex]);
+      return;
+    }
+    const idx = list.findIndex((s) => (s.videoId || s.id) === (currentRef.current?.videoId || currentRef.current?.id));
+    const nextIdx = (idx + 1) % list.length;
+    playSong(list[nextIdx]);
+  }, [currentSongList, playSong]);
 
-  const handlePrev = () => {
-    if (!songs.length) return;
-    const prevIdx = (currentIndex - 1 + songs.length) % songs.length;
-    setCurrentIndex(prevIdx);
-    setIsPlaying(true);
-  };
+  const previousSong = useCallback(() => {
+    const list = currentSongList;
+    if (!list.length) return;
+    const idx = list.findIndex((s) => (s.videoId || s.id) === (currentRef.current?.videoId || currentRef.current?.id));
+    const prevIdx = (idx - 1 + list.length) % list.length;
+    playSong(list[prevIdx]);
+  }, [currentSongList, playSong]);
 
-  const handleSelectSong = (index) => {
-    setCurrentIndex(index);
-    setIsPlaying(true);
-  };
-
-  const handleAudioError = () => {
-    // Nếu luồng YouTube bị lỗi nhưng bài hát có audioUrl dự phòng thì tự động chuyển sang audioUrl
-    const audio = audioRef.current;
-    if (audio && currentSong?.audioUrl && !audio.src.includes(currentSong.audioUrl)) {
-      audio.src = currentSong.audioUrl;
-      if (isPlaying) {
+  const handleSongEnd = useCallback(() => {
+    if (repeatModeRef.current === 'one') {
+      const audio = audioRef.current;
+      if (audio) {
+        audio.currentTime = 0;
         audio.play().catch(() => {});
       }
       return;
     }
-    setLoadingTrack(false);
-    setErrorMsg('Luồng âm thanh gặp sự cố hoặc bị chặn. Đang thử chuyển bài hoặc dùng link trực tiếp.');
-  };
+    if (repeatModeRef.current === 'all') {
+      nextSong();
+    }
+  }, [nextSong]);
 
-  const handleTimeUpdate = () => {
+  const handleAudioTimeUpdate = () => {
     const audio = audioRef.current;
     if (!audio) return;
     setCurrentTime(audio.currentTime || 0);
     if (audio.duration && !Number.isNaN(audio.duration)) {
       setDuration(audio.duration);
-      if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession) {
-        try {
-          navigator.mediaSession.setPositionState({
-            duration: audio.duration,
-            playbackRate: audio.playbackRate || 1,
-            position: Math.min(audio.currentTime, audio.duration)
-          });
-        } catch (_) {}
-      }
     }
   };
 
-  const handleAddSong = async (e) => {
+  const handleAudioError = () => {
+    setLoadingTrack(false);
+    // Nếu audio stream lỗi, kích hoạt YouTube Player dự phòng
+    if (current?.videoId && playerRef.current?.loadVideoById) {
+      useYtFallback.current = true;
+      playerRef.current.loadVideoById(current.videoId);
+      setIsPlaying(true);
+    } else {
+      setNotice('Không thể phát luồng âm thanh bài này. Đang chuyển bài tiếp theo...');
+      setTimeout(() => nextSong(), 1500);
+    }
+  };
+
+  const toggleFavorite = (song) => {
+    setFavorites((prev) => {
+      const key = song.videoId || song.id;
+      const exists = prev.some((s) => (s.videoId || s.id) === key);
+      if (exists) {
+        setNotice('Đã bỏ khỏi danh sách yêu thích.');
+        return prev.filter((s) => (s.videoId || s.id) !== key);
+      } else {
+        setNotice('Đã lưu vào danh sách yêu thích!');
+        return [song, ...prev];
+      }
+    });
+  };
+
+  // Thêm bài hoặc nạp Playlist
+  const handleAddSubmit = async (e) => {
     e.preventDefault();
-    if (!urlOrId.trim()) return;
-    setSubmitting(true);
-    setErrorMsg('');
+    if (!addUrl.trim()) return;
+    setSubmittingAdd(true);
+    setNotice('');
+
     try {
-      const res = await fetch(`${API_BASE}/songs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urlOrId, title, artist })
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Không thêm được bài hát');
-      setSongs((prev) => [data, ...prev]);
-      setCurrentIndex(0);
-      setUrlOrId('');
-      setTitle('');
-      setArtist('');
+      if (addMode === 'playlist') {
+        const res = await fetch(`${API}/playlist`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: addUrl.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Không thể nạp playlist');
+        setNotice(data.message || `Đã nhập ${data.count} bài hát từ playlist!`);
+        loadLibrary();
+        setAddUrl('');
+        setShowAddModal(false);
+        setActiveTab('library');
+      } else {
+        const res = await fetch(`${API}/songs`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url: addUrl.trim(),
+            title: addTitle.trim(),
+            artist: addArtist.trim()
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Không thể thêm bài hát');
+        setNotice(`Đã thêm bài hát: ${data.song.title}`);
+        loadLibrary();
+        setAddUrl('');
+        setAddTitle('');
+        setAddArtist('');
+        setShowAddModal(false);
+        playSong(data.song);
+      }
     } catch (err) {
-      setErrorMsg(err.message);
+      setNotice(err.message || 'Lỗi khi thêm bài hát từ YouTube.');
     } finally {
-      setSubmitting(false);
+      setSubmittingAdd(false);
     }
   };
 
-  const handleDeleteSong = async (id, idx) => {
-    try {
-      await fetch(`${API_BASE}/songs/${id}`, { method: 'DELETE' });
-      const updated = songs.filter((s) => s.id !== id);
-      setSongs(updated);
-      if (idx === currentIndex) {
-        setCurrentIndex(0);
-      } else if (idx < currentIndex) {
-        setCurrentIndex((c) => Math.max(0, c - 1));
-      }
-    } catch (_) {}
-  };
-
-  const formatTime = (sec) => {
-    if (!sec || Number.isNaN(sec)) return '0:00';
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m}:${s < 10 ? '0' : ''}${s}`;
-  };
+  const isFavorite = current && favorites.some((s) => (s.videoId || s.id) === (current.videoId || current.id));
 
   return (
-    <div style={styles.page}>
-      {/* Thẻ <audio> gốc duy nhất giúp iOS tiếp tục phát nhạc khi tắt màn hình */}
+    <div className="app-shell">
+      {/* THẺ HTML5 AUDIO GỐC DUY NHẤT: Phát nhạc nền khi khóa màn hình iPhone */}
       <audio
         ref={audioRef}
         playsInline
         preload="auto"
-        onTimeUpdate={handleTimeUpdate}
-        onLoadedMetadata={handleTimeUpdate}
-        onEnded={handleNext}
+        onTimeUpdate={handleAudioTimeUpdate}
+        onLoadedMetadata={handleAudioTimeUpdate}
+        onEnded={handleSongEnd}
         onPlay={() => setIsPlaying(true)}
         onPause={() => setIsPlaying(false)}
         onWaiting={() => setLoadingTrack(true)}
@@ -298,38 +427,391 @@ export default function App() {
         style={{ display: 'none' }}
       />
 
-      <div style={styles.container}>
-        <header style={styles.header}>
-          <div>
-            <span style={styles.badge}>iOS LOCK SCREEN AUDIO READY</span>
-            <h1 style={styles.logo}>NOCTRA</h1>
-            <p style={styles.subtitle}>
-              Phát bằng luồng HTML5 Audio trực tiếp — tiếp tục nghe khi tắt màn hình iPhone
-            </p>
+      {/* YOUTUBE IFRAME DỰ PHÒNG */}
+      <div style={{ position: 'fixed', width: 1, height: 1, opacity: 0.001, pointerEvents: 'none' }}>
+        <div id="yt-fallback-player" />
+      </div>
+
+      {/* SIDEBAR DESKTOP */}
+      <aside className="sidebar">
+        <a className="brand" href="#" onClick={(e) => { e.preventDefault(); setActiveTab('trending'); setSearchQuery(''); }}>
+          <span className="brand-mark"><AudioLines size={22} /></span>
+          <span>NOCTRA</span>
+        </a>
+
+        <p className="nav-label">YOUTUBE KHÁM PHÁ</p>
+        {CATEGORIES.map((cat) => {
+          const Icon = cat.icon;
+          return (
+            <button
+              key={cat.id}
+              className={`nav-item ${activeTab === cat.id && !searchQuery ? 'active' : ''}`}
+              onClick={() => { setActiveTab(cat.id); setSearchQuery(''); }}
+            >
+              <Icon size={17} />
+              <span>{cat.label}</span>
+            </button>
+          );
+        })}
+
+        <p className="nav-label" style={{ marginTop: '18px' }}>BỘ SƯU TẬP</p>
+        <button
+          className={`nav-item ${activeTab === 'favorites' && !searchQuery ? 'active' : ''}`}
+          onClick={() => { setActiveTab('favorites'); setSearchQuery(''); }}
+        >
+          <Heart size={17} />
+          <span>Yêu thích ({favorites.length})</span>
+        </button>
+        <button
+          className={`nav-item ${activeTab === 'history' && !searchQuery ? 'active' : ''}`}
+          onClick={() => { setActiveTab('history'); setSearchQuery(''); }}
+        >
+          <Clock3 size={17} />
+          <span>Gần đây</span>
+        </button>
+        <button
+          className={`nav-item ${activeTab === 'library' && !searchQuery ? 'active' : ''}`}
+          onClick={() => { setActiveTab('library'); setSearchQuery(''); }}
+        >
+          <Library size={17} />
+          <span>Đã lưu ({librarySongs.length})</span>
+        </button>
+
+        <div className="sidebar-bottom">
+          <button className="import-btn" onClick={() => setShowAddModal(true)}>
+            <ListPlus size={16} />
+            <span>Nhập Playlist / Thêm bài</span>
+          </button>
+          <div className="sidebar-note">
+            <Moon size={16} />
+            <span>Tối ưu khóa màn hình & chạy ngầm iOS</span>
           </div>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <main className="main-content">
+        {/* TOPBAR */}
+        <header className="topbar">
+          <div className="mobile-brand" onClick={() => { setActiveTab('trending'); setSearchQuery(''); }}>
+            <span className="brand-mark"><AudioLines size={19} /></span>
+            <b>NOCTRA</b>
+          </div>
+
+          <label className="search-box">
+            {isSearching ? <Loader2 size={18} className="spinner" /> : <Search size={18} />}
+            <input
+              value={searchQuery}
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Tìm mọi bài hát, ca sĩ trên YouTube..."
+            />
+            {searchQuery && (
+              <button className="clear-search" onClick={() => handleSearchChange('')} aria-label="Xóa tìm kiếm">
+                <X size={15} />
+              </button>
+            )}
+          </label>
+
+          <button className="icon-button add-top" aria-label="Thêm nhạc YouTube" onClick={() => setShowAddModal(true)}>
+            <Plus size={20} />
+          </button>
         </header>
 
-        {errorMsg && <div style={styles.alert}>{errorMsg}</div>}
+        {/* MOBILE CATEGORY SCROLL BAR CHO IPHONE */}
+        <div className="mobile-categories">
+          {CATEGORIES.map((cat) => {
+            const Icon = cat.icon;
+            return (
+              <button
+                key={cat.id}
+                className={`cat-pill ${activeTab === cat.id && !searchQuery ? 'active' : ''}`}
+                onClick={() => { setActiveTab(cat.id); setSearchQuery(''); }}
+              >
+                <Icon size={14} />
+                <span>{cat.label}</span>
+              </button>
+            );
+          })}
+        </div>
 
-        {/* Trình phát chính */}
-        {currentSong && (
-          <section style={styles.playerCard}>
-            <div style={styles.nowPlayingRow}>
-              <img
-                src={currentSong.thumbnail}
-                alt={currentSong.title}
-                style={styles.cover}
-              />
-              <div style={styles.trackMeta}>
-                <div style={styles.statusPill}>
-                  {loadingTrack ? 'Đang tải luồng âm thanh...' : isPlaying ? 'Đang phát nền (hỗ trợ khóa màn hình)' : 'Đang tạm dừng'}
-                </div>
-                <h2 style={styles.trackTitle}>{currentSong.title}</h2>
-                <p style={styles.trackArtist}>{currentSong.artist}</p>
+        {/* HERO BANNER */}
+        {activeTab === 'trending' && !searchQuery && (
+          <section className="hero">
+            <div className="hero-copy">
+              <span className="eyebrow"><span className="live-dot" /> YOUTUBE LIVE SYNC · CẬP NHẬT LIÊN TỤC</span>
+              <h1>Nghe nhạc YouTube.<br /><em>Không gián đoạn.</em></h1>
+              <p>Tự động cập nhật các bản nhạc thịnh hành nhất hôm nay.<br className="desktop-break" /> Phát nền mượt mà khi tắt màn hình iPhone.</p>
+              <div className="hero-actions">
+                <button
+                  className="primary-button"
+                  onClick={() => currentSongList.length > 0 && playSong(currentSongList[0])}
+                >
+                  <Play size={17} fill="currentColor" /> Phát ngay hôm nay
+                </button>
+                <button
+                  className="secondary-button"
+                  onClick={() => setShowAddModal(true)}
+                >
+                  <ListPlus size={16} /> Nhập Playlist YouTube
+                </button>
               </div>
             </div>
+            <div className="hero-art">
+              <div className="orbit orbit-one" /><div className="orbit orbit-two" />
+              <div className="moon-art">
+                <div className="moon-crater crater-one" />
+                <div className="moon-crater crater-two" />
+                <div className="moon-crater crater-three" />
+              </div>
+              <span className="star star-one">✦</span>
+              <span className="star star-two">✧</span>
+              <span className="star star-three">·</span>
+            </div>
+          </section>
+        )}
 
-            <div style={styles.progressWrap}>
+        {/* MUSIC SECTION */}
+        <section className="music-section">
+          <div className="section-heading">
+            <div>
+              <span className="eyebrow">
+                {searchQuery ? 'YOUTUBE SEARCH RESULTS' : activeTab.toUpperCase()}
+              </span>
+              <h2>
+                {searchQuery
+                  ? `Kết quả cho "${searchQuery}"`
+                  : activeTab === 'favorites'
+                  ? 'Bài hát yêu thích của bạn'
+                  : activeTab === 'history'
+                  ? 'Lịch sử nghe gần đây'
+                  : activeTab === 'library'
+                  ? 'Thư viện bài hát đã lưu'
+                  : `Nhạc ${CATEGORIES.find((c) => c.id === activeTab)?.label || 'Thịnh hành'} YouTube`}
+              </h2>
+            </div>
+            {!searchQuery && (
+              <button className="text-button" onClick={() => setShowAddModal(true)}>
+                <Plus size={16} /> Nhập bài / Playlist
+              </button>
+            )}
+          </div>
+
+          {/* LOADING STATE */}
+          {loadingCategory && currentSongList.length === 0 && (
+            <div className="empty-state">
+              <Loader2 size={32} className="spinner" />
+              <p>Đang đồng bộ bài hát trực tiếp từ YouTube…</p>
+            </div>
+          )}
+
+          {/* EMPTY STATE */}
+          {!loadingCategory && currentSongList.length === 0 && (
+            <div className="empty-state">
+              <Library size={36} />
+              <p>
+                {searchQuery
+                  ? 'Không tìm thấy kết quả phù hợp trên YouTube.'
+                  : activeTab === 'favorites'
+                  ? 'Bạn chưa có bài hát yêu thích nào. Bấm trái tim ở bài hát bất kỳ để lưu!'
+                  : 'Chưa có bài hát ở mục này.'}
+              </p>
+              <button className="primary-button" onClick={() => setShowAddModal(true)}>
+                <Plus size={16} /> Nhập nhạc từ YouTube
+              </button>
+            </div>
+          )}
+
+          {/* SONG GRID */}
+          <div className="song-grid">
+            {currentSongList.map((song, index) => {
+              const songKey = song.videoId || song.id;
+              const isSelected = (current?.videoId || current?.id) === songKey;
+              const isItemPlaying = isSelected && isPlaying;
+              const isLiked = favorites.some((s) => (s.videoId || s.id) === songKey);
+
+              return (
+                <article
+                  key={song.id || `${song.videoId}-${index}`}
+                  className={`song-card ${isSelected ? 'selected' : ''}`}
+                >
+                  <button
+                    className="cover-button"
+                    onClick={() => playSong(song)}
+                    aria-label={`Phát ${song.title}`}
+                  >
+                    <img
+                      src={song.cover || `https://i.ytimg.com/vi/${song.videoId}/hqdefault.jpg`}
+                      alt={song.title}
+                      loading="lazy"
+                    />
+                    <span className="cover-play">
+                      {isItemPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+                    </span>
+                    <span className="track-index">{String(index + 1).padStart(2, '0')}</span>
+                    {song.duration && <span className="duration-tag">{song.duration}</span>}
+                  </button>
+
+                  <div className="song-meta">
+                    <div className="song-text" onClick={() => playSong(song)}>
+                      <h3 title={song.title}>{song.title}</h3>
+                      <p title={song.artist}>{song.artist}</p>
+                    </div>
+                    <button
+                      className={`heart-button ${isLiked ? 'liked' : ''}`}
+                      aria-label="Yêu thích"
+                      onClick={(e) => { e.stopPropagation(); toggleFavorite(song); }}
+                    >
+                      <Heart size={18} fill={isLiked ? 'currentColor' : 'none'} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </section>
+
+        <footer className="footer">
+          <span>© 2026 NOCTRA · Tối ưu cho iPhone Safari & Màn hình khóa</span>
+          <span>YouTube Live Sync <span className="footer-star">✦</span></span>
+        </footer>
+      </main>
+
+      {/* MOBILE BOTTOM NAVIGATION BAR */}
+      <nav className="mobile-nav">
+        <button
+          className={activeTab === 'trending' && !searchQuery ? 'active' : ''}
+          onClick={() => { setActiveTab('trending'); setSearchQuery(''); }}
+        >
+          <Flame size={20} />
+          <span>Thịnh hành</span>
+        </button>
+        <button
+          className={activeTab === 'vpop' && !searchQuery ? 'active' : ''}
+          onClick={() => { setActiveTab('vpop'); setSearchQuery(''); }}
+        >
+          <Sparkles size={20} />
+          <span>V-Pop</span>
+        </button>
+        <button
+          className={activeTab === 'favorites' && !searchQuery ? 'active' : ''}
+          onClick={() => { setActiveTab('favorites'); setSearchQuery(''); }}
+        >
+          <Heart size={20} />
+          <span>Yêu thích</span>
+        </button>
+        <button
+          className={activeTab === 'history' && !searchQuery ? 'active' : ''}
+          onClick={() => { setActiveTab('history'); setSearchQuery(''); }}
+        >
+          <Clock3 size={20} />
+          <span>Gần đây</span>
+        </button>
+        <button onClick={() => setShowAddModal(true)}>
+          <Plus size={20} />
+          <span>Thêm nhạc</span>
+        </button>
+      </nav>
+
+      {/* NOW PLAYING BOTTOM BAR */}
+      <section className={`now-playing ${current ? 'has-song' : ''}`}>
+        <div className="now-song" onClick={() => current && setShowPlayer(true)}>
+          {current ? (
+            <img
+              className="now-cover"
+              src={current.cover || `https://i.ytimg.com/vi/${current.videoId}/hqdefault.jpg`}
+              alt={current.title}
+            />
+          ) : (
+            <div className="now-cover placeholder"><Headphones size={22} /></div>
+          )}
+          <div className="now-info">
+            <b title={current?.title}>{current?.title || 'Chưa phát bài nào'}</b>
+            <span title={current?.artist}>
+              {loadingTrack ? 'Đang tải luồng âm thanh...' : current?.artist || 'Chọn một bài YouTube để bắt đầu'}
+            </span>
+          </div>
+        </div>
+
+        <div className="player-controls">
+          <button
+            className="control-subtle desktop-only"
+            onClick={() => setShuffle(!shuffle)}
+            aria-label="Phát ngẫu nhiên"
+            style={{ color: shuffle ? 'var(--accent)' : 'inherit' }}
+          >
+            <Shuffle size={17} />
+          </button>
+
+          <button className="control-subtle" onClick={previousSong} aria-label="Bài trước">
+            <SkipBack size={20} fill="currentColor" />
+          </button>
+
+          <button className="play-button" onClick={togglePlay} aria-label={isPlaying ? 'Tạm dừng' : 'Phát'}>
+            {loadingTrack ? <Loader2 size={20} className="spinner" /> : isPlaying ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
+          </button>
+
+          <button className="control-subtle" onClick={nextSong} aria-label="Bài tiếp">
+            <SkipForward size={20} fill="currentColor" />
+          </button>
+
+          <button
+            className="control-subtle desktop-only"
+            onClick={() => {
+              const next = repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off';
+              setRepeatMode(next);
+            }}
+            aria-label="Lặp lại"
+            style={{ color: repeatMode !== 'off' ? 'var(--accent)' : 'inherit' }}
+          >
+            {repeatMode === 'one' ? <Repeat1 size={17} /> : <Repeat size={17} />}
+          </button>
+        </div>
+
+        <div className="player-extra">
+          <button
+            className={`heart-button ${isFavorite ? 'liked' : ''}`}
+            onClick={() => current && toggleFavorite(current)}
+            aria-label="Yêu thích"
+          >
+            <Heart size={19} fill={isFavorite ? 'currentColor' : 'none'} />
+          </button>
+
+          <button className="control-subtle" onClick={() => setShowPlayer(true)} aria-label="Mở trình phát">
+            <MoreHorizontal size={20} />
+          </button>
+        </div>
+      </section>
+
+      {/* FULLSCREEN PLAYER OVERLAY */}
+      {showPlayer && current && (
+        <div className="player-overlay" role="dialog" aria-modal="true" aria-label="Trình phát nhạc">
+          <button className="overlay-close" onClick={() => setShowPlayer(false)} aria-label="Đóng">
+            <X size={22} />
+          </button>
+          <div className="player-overlay-inner">
+            <span className="eyebrow"><AudioLines size={14} /> ĐANG PHÁT TỪ YOUTUBE</span>
+            <div className="large-cover">
+              <img
+                src={current.cover || `https://i.ytimg.com/vi/${current.videoId}/hqdefault.jpg`}
+                alt={current.title}
+              />
+            </div>
+
+            <div className="overlay-song-row">
+              <div className="overlay-titles">
+                <h2>{current.title}</h2>
+                <p>{current.artist}</p>
+              </div>
+              <button
+                className={`heart-button big ${isFavorite ? 'liked' : ''}`}
+                onClick={() => toggleFavorite(current)}
+              >
+                <Heart size={24} fill={isFavorite ? 'currentColor' : 'none'} />
+              </button>
+            </div>
+
+            {/* THANH THỜI GIAN TIẾN ĐỘ THẬT */}
+            <div style={{ width: '100%', margin: '14px 0 6px' }}>
               <input
                 type="range"
                 min={0}
@@ -340,311 +822,164 @@ export default function App() {
                   if (audioRef.current) audioRef.current.currentTime = val;
                   setCurrentTime(val);
                 }}
-                style={styles.slider}
+                style={{ width: '100%', accentColor: 'var(--accent)', cursor: 'pointer' }}
               />
-              <div style={styles.timeRow}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#8b8e98', marginTop: 4 }}>
                 <span>{formatTime(currentTime)}</span>
                 <span>{formatTime(duration)}</span>
               </div>
             </div>
 
-            <div style={styles.controls}>
-              <button onClick={handlePrev} style={styles.secondaryBtn} type="button">
-                ⏮ Trước
+            <div className="overlay-controls">
+              <button
+                className={`mode-btn ${shuffle ? 'active' : ''}`}
+                onClick={() => setShuffle(!shuffle)}
+                aria-label="Ngẫu nhiên"
+              >
+                <Shuffle size={20} />
               </button>
-              <button onClick={togglePlay} style={styles.primaryBtn} type="button">
-                {isPlaying ? '⏸ Tạm dừng' : '▶ Phát nhạc'}
+
+              <button onClick={previousSong} aria-label="Bài trước">
+                <SkipBack size={26} fill="currentColor" />
               </button>
-              <button onClick={handleNext} style={styles.secondaryBtn} type="button">
-                Tiếp ⏭
+
+              <button className="overlay-play" onClick={togglePlay} aria-label={isPlaying ? 'Tạm dừng' : 'Phát'}>
+                {isPlaying ? <Pause size={30} fill="currentColor" /> : <Play size={30} fill="currentColor" />}
+              </button>
+
+              <button onClick={nextSong} aria-label="Bài tiếp">
+                <SkipForward size={26} fill="currentColor" />
+              </button>
+
+              <button
+                className={`mode-btn ${repeatMode !== 'off' ? 'active' : ''}`}
+                onClick={() => {
+                  const next = repeatMode === 'off' ? 'all' : repeatMode === 'all' ? 'one' : 'off';
+                  setRepeatMode(next);
+                }}
+                aria-label="Lặp lại"
+              >
+                {repeatMode === 'one' ? <Repeat1 size={20} /> : <Repeat size={20} />}
               </button>
             </div>
-          </section>
-        )}
 
-        {/* Form thêm bài */}
-        <form onSubmit={handleAddSong} style={styles.formCard}>
-          <h3 style={styles.sectionTitle}>Thêm bài hát mới</h3>
-          <input
-            type="text"
-            placeholder="Dán link YouTube, ID video hoặc link trực tiếp .mp3 / .m4a..."
-            value={urlOrId}
-            onChange={(e) => setUrlOrId(e.target.value)}
-            style={styles.input}
-            required
-          />
-          <div style={styles.formRow}>
-            <input
-              type="text"
-              placeholder="Tên bài hát (tự điền nếu để trống)"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              style={styles.input}
-            />
-            <input
-              type="text"
-              placeholder="Nghệ sĩ (tự điền nếu để trống)"
-              value={artist}
-              onChange={(e) => setArtist(e.target.value)}
-              style={styles.input}
-            />
-          </div>
-          <button type="submit" disabled={submitting} style={styles.addBtn}>
-            {submitting ? 'Đang xử lý luồng nhạc...' : '+ Thêm vào danh sách phát'}
-          </button>
-        </form>
-
-        {/* Danh sách bài hát */}
-        <section style={styles.listSection}>
-          <h3 style={styles.sectionTitle}>Danh sách phát ({songs.length})</h3>
-          {songs.map((song, idx) => {
-            const active = idx === currentIndex;
-            return (
-              <div
-                key={song.id}
-                onClick={() => handleSelectSong(idx)}
-                style={{
-                  ...styles.songItem,
-                  borderColor: active ? '#8b5cf6' : 'rgba(255,255,255,0.08)',
-                  background: active ? 'rgba(139, 92, 246, 0.16)' : 'rgba(255,255,255,0.03)'
-                }}
+            {current.videoId && (
+              <a
+                className="youtube-link"
+                href={`https://www.youtube.com/watch?v=${current.videoId}`}
+                target="_blank"
+                rel="noreferrer"
+                style={{ marginTop: 10 }}
               >
-                <img src={song.thumbnail} alt={song.title} style={styles.thumbSmall} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={styles.songName}>
-                    {active && isPlaying ? '🔊 ' : ''}
-                    {song.title}
-                  </div>
-                  <div style={styles.songSub}>{song.artist}</div>
-                </div>
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    handleDeleteSong(song.id, idx);
-                  }}
-                  style={styles.deleteBtn}
-                >
-                  ✕
-                </button>
+                <Youtube size={17} /> Mở bài này trên YouTube <ExternalLink size={13} />
+              </a>
+            )}
+
+            <p className="background-note" style={{ marginTop: 16 }}>
+              ✨ Đã hỗ trợ phát nền & điều khiển trên màn hình khóa iPhone qua MediaSession.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* ADD / IMPORT PLAYLIST MODAL */}
+      {showAddModal && (
+        <div className="modal-backdrop" onClick={() => setShowAddModal(false)}>
+          <div className="add-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-heading">
+              <div>
+                <span className="eyebrow">YOUTUBE IMPORT</span>
+                <h2>Thêm nhạc từ YouTube</h2>
               </div>
-            );
-          })}
-        </section>
-      </div>
+              <button type="button" className="icon-button" onClick={() => setShowAddModal(false)}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* TAB SELECTOR: BÀI ĐƠN HOẶC TOÀN BỘ PLAYLIST */}
+            <div className="modal-mode-tabs">
+              <button
+                type="button"
+                className={`mode-tab ${addMode === 'single' ? 'active' : ''}`}
+                onClick={() => setAddMode('single')}
+              >
+                1 Bài hát bất kỳ
+              </button>
+              <button
+                type="button"
+                className={`mode-tab ${addMode === 'playlist' ? 'active' : ''}`}
+                onClick={() => setAddMode('playlist')}
+              >
+                Nhập cả Playlist YouTube
+              </button>
+            </div>
+
+            <form onSubmit={handleAddSubmit}>
+              {addMode === 'playlist' ? (
+                <>
+                  <label className="field-label">
+                    Đường dẫn Playlist YouTube
+                    <input
+                      required
+                      value={addUrl}
+                      onChange={(e) => setAddUrl(e.target.value)}
+                      placeholder="https://www.youtube.com/playlist?list=PL..."
+                    />
+                  </label>
+                  <p className="form-hint">
+                    <ListPlus size={16} /> Tự động quét và lưu toàn bộ danh sách 20-50 bài hát từ playlist vào máy.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <label className="field-label">
+                    Đường dẫn video, ID YouTube hoặc link MP3
+                    <input
+                      required
+                      value={addUrl}
+                      onChange={(e) => setAddUrl(e.target.value)}
+                      placeholder="https://www.youtube.com/watch?v=... hoặc youtu.be/..."
+                    />
+                  </label>
+                  <label className="field-label">
+                    Tên bài hát <span>(Tự động nhận diện từ YouTube nếu để trống)</span>
+                    <input
+                      value={addTitle}
+                      onChange={(e) => setAddTitle(e.target.value)}
+                      placeholder="Tự động nhận diện..."
+                    />
+                  </label>
+                  <label className="field-label">
+                    Ca sĩ / Kênh <span>(Tự động nhận diện từ YouTube nếu để trống)</span>
+                    <input
+                      value={addArtist}
+                      onChange={(e) => setAddArtist(e.target.value)}
+                      placeholder="Tự động nhận diện..."
+                    />
+                  </label>
+                </>
+              )}
+
+              <button className="primary-button submit-button" type="submit" disabled={submittingAdd}>
+                {submittingAdd ? (
+                  <><Loader2 size={18} className="spinner" /> Đang xử lý từ YouTube…</>
+                ) : (
+                  <><Plus size={18} /> {addMode === 'playlist' ? 'Nhập toàn bộ Playlist' : 'Thêm bài vào thư viện'}</>
+                )}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* TOAST NOTIFICATION */}
+      {notice && (
+        <button className="toast" onClick={() => setNotice('')}>
+          <Check size={16} />
+          <span>{notice}</span>
+          <X size={15} />
+        </button>
+      )}
     </div>
   );
 }
-
-const styles = {
-  page: {
-    minHeight: '100vh',
-    background: '#090a10',
-    color: '#f3f4f6',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
-    padding: '20px 14px 48px'
-  },
-  container: {
-    maxWidth: 540,
-    margin: '0 auto'
-  },
-  header: {
-    marginBottom: 18
-  },
-  badge: {
-    display: 'inline-block',
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: '0.08em',
-    color: '#c4b5fd',
-    background: 'rgba(139, 92, 246, 0.2)',
-    padding: '4px 10px',
-    borderRadius: 999,
-    marginBottom: 8
-  },
-  logo: {
-    margin: '0 0 4px',
-    fontSize: 28,
-    fontWeight: 800,
-    letterSpacing: '-0.02em'
-  },
-  subtitle: {
-    margin: 0,
-    fontSize: 13,
-    color: '#9ca3af'
-  },
-  alert: {
-    background: 'rgba(239, 68, 68, 0.16)',
-    border: '1px solid rgba(239, 68, 68, 0.4)',
-    color: '#fca5a5',
-    padding: '10px 12px',
-    borderRadius: 12,
-    fontSize: 13,
-    marginBottom: 16
-  },
-  playerCard: {
-    background: 'linear-gradient(145deg, #151828, #0f111c)',
-    border: '1px solid rgba(139, 92, 246, 0.35)',
-    borderRadius: 20,
-    padding: 18,
-    marginBottom: 18,
-    boxShadow: '0 12px 32px rgba(0,0,0,0.45)'
-  },
-  nowPlayingRow: {
-    display: 'flex',
-    gap: 14,
-    alignItems: 'center',
-    marginBottom: 14
-  },
-  cover: {
-    width: 76,
-    height: 76,
-    borderRadius: 14,
-    objectFit: 'cover',
-    flexShrink: 0
-  },
-  trackMeta: {
-    minWidth: 0,
-    flex: 1
-  },
-  statusPill: {
-    fontSize: 11,
-    color: '#a78bfa',
-    marginBottom: 4,
-    fontWeight: 600
-  },
-  trackTitle: {
-    margin: '0 0 4px',
-    fontSize: 17,
-    fontWeight: 700,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  },
-  trackArtist: {
-    margin: 0,
-    fontSize: 13,
-    color: '#9ca3af'
-  },
-  progressWrap: {
-    marginBottom: 12
-  },
-  slider: {
-    width: '100%',
-    accentColor: '#8b5cf6',
-    cursor: 'pointer'
-  },
-  timeRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    fontSize: 12,
-    color: '#9ca3af',
-    marginTop: 4
-  },
-  controls: {
-    display: 'flex',
-    gap: 10,
-    justifyContent: 'center'
-  },
-  primaryBtn: {
-    flex: 1.4,
-    background: '#8b5cf6',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 12,
-    padding: '12px 16px',
-    fontWeight: 700,
-    fontSize: 15,
-    cursor: 'pointer'
-  },
-  secondaryBtn: {
-    flex: 1,
-    background: 'rgba(255,255,255,0.08)',
-    color: '#e5e7eb',
-    border: 'none',
-    borderRadius: 12,
-    padding: '12px 12px',
-    fontWeight: 600,
-    fontSize: 14,
-    cursor: 'pointer'
-  },
-  formCard: {
-    background: 'rgba(255,255,255,0.03)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 18,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 10
-  },
-  sectionTitle: {
-    margin: '0 0 6px',
-    fontSize: 15,
-    fontWeight: 700
-  },
-  formRow: {
-    display: 'flex',
-    gap: 8
-  },
-  input: {
-    width: '100%',
-    boxSizing: 'border-box',
-    background: '#121420',
-    border: '1px solid rgba(255,255,255,0.12)',
-    borderRadius: 10,
-    padding: '10px 12px',
-    color: '#fff',
-    fontSize: 13
-  },
-  addBtn: {
-    background: '#6d28d9',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 10,
-    padding: '11px 14px',
-    fontWeight: 600,
-    fontSize: 13,
-    cursor: 'pointer'
-  },
-  listSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8
-  },
-  songItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 12,
-    padding: '10px 12px',
-    borderRadius: 14,
-    border: '1px solid rgba(255,255,255,0.08)',
-    cursor: 'pointer'
-  },
-  thumbSmall: {
-    width: 46,
-    height: 46,
-    borderRadius: 10,
-    objectFit: 'cover'
-  },
-  songName: {
-    fontSize: 14,
-    fontWeight: 600,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  },
-  songSub: {
-    fontSize: 12,
-    color: '#9ca3af',
-    marginTop: 2
-  },
-  deleteBtn: {
-    background: 'transparent',
-    color: '#9ca3af',
-    border: 'none',
-    fontSize: 15,
-    padding: '4px 8px',
-    cursor: 'pointer'
-  }
-};
