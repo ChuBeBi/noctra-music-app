@@ -7,21 +7,6 @@ import {
 
 const API = (import.meta.env.VITE_API_URL || '/api').replace(/\/$/, '');
 
-// Ngăn WebKit/YouTube tự động tạm dừng khi màn hình điện thoại khóa hoặc đổi tab
-try {
-  if (typeof document !== 'undefined') {
-    Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
-    Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
-    document.hasFocus = () => true;
-    window.addEventListener('visibilitychange', (e) => {
-      e.stopImmediatePropagation();
-    }, true);
-  }
-} catch (_) {}
-
-// Âm thanh giữ nhịp chạy nền nhẹ 1KB cho iOS Safari Lock-Screen
-const SILENT_CARRIER_AUDIO = 'data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA';
-
 const CATEGORIES = [
   { id: 'trending', label: 'Thịnh hành', icon: Flame },
   { id: 'vpop', label: 'V-Pop Hot', icon: Sparkles },
@@ -229,52 +214,22 @@ export default function App() {
             playerVars: {
               autoplay: 0,
               playsinline: 1,
-              controls: 0,
-              disablekb: 1,
-              fs: 0,
+              controls: 1,
+              disablekb: 0,
+              fs: 1,
               modestbranding: 1,
               rel: 0
             },
             events: {
               onReady: () => {
                 isYtReadyRef.current = true;
+                try { ytPlayerRef.current.mute(); } catch (_) {}
               },
               onStateChange: (event) => {
-                // 1 = PLAYING (Đang phát - tải thành công tức thì)
-                if (event.data === 1) {
-                  setIsPlaying(true);
-                  setLoadingTrack(false);
-                  const d = event.target.getDuration();
-                  if (d && !Number.isNaN(d)) setDuration(d);
-                  if (currentRef.current) updateMediaSession(currentRef.current);
-                  if (audioRef.current) {
-                    audioRef.current.play().catch(() => {});
-                  }
-                } else if (event.data === 2) {
-                  // 2 = PAUSED
-                  setIsPlaying(false);
-                } else if (event.data === 0) {
-                  // 0 = ENDED (Hết bài - Tự động chuyển bài kế tiếp)
-                  if (loopModeRef.current === 'one') {
-                    event.target.seekTo(0);
-                    event.target.playVideo();
-                  } else {
-                    nextSong();
-                  }
-                } else if (event.data === 3) {
-                  // 3 = BUFFERING
-                  setLoadingTrack(true);
-                } else if (event.data === 5) {
-                  // 5 = CUED -> Tự động kích hoạt phát
-                  try {
-                    event.target.playVideo();
-                  } catch (_) {}
+                if (event.data === 0) {
+                  // Hết video MV -> chuyển bài
+                  nextSong();
                 }
-              },
-              onError: (err) => {
-                console.warn('YouTube Player error code:', err.data);
-                showToast('Video YouTube hạn chế nhúng, đang chuyển bài kế...');
-                setTimeout(() => nextSong(), 1000);
               }
             }
           });
@@ -312,24 +267,22 @@ export default function App() {
     if (!('mediaSession' in navigator)) return;
     try {
       navigator.mediaSession.setActionHandler('play', () => {
-        if (ytPlayerRef.current) {
-          try { ytPlayerRef.current.playVideo(); } catch (_) {}
+        if (audioRef.current) {
+          audioRef.current.play().catch(() => {});
         }
-        if (audioRef.current) audioRef.current.play().catch(() => {});
         setIsPlaying(true);
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        if (ytPlayerRef.current) {
-          try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
+        if (audioRef.current) {
+          audioRef.current.pause();
         }
-        if (audioRef.current) audioRef.current.pause();
         setIsPlaying(false);
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => previousSong());
       navigator.mediaSession.setActionHandler('nexttrack', () => nextSong());
       navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime != null && ytPlayerRef.current) {
-          try { ytPlayerRef.current.seekTo(details.seekTime, true); } catch (_) {}
+        if (details.seekTime != null && audioRef.current) {
+          audioRef.current.currentTime = details.seekTime;
           setCurrentTime(details.seekTime);
         }
       });
@@ -357,12 +310,36 @@ export default function App() {
 
   // Cài đặt tốc độ phát
   useEffect(() => {
+    if (audioRef.current) {
+      audioRef.current.playbackRate = playbackRate;
+    }
     if (ytPlayerRef.current && typeof ytPlayerRef.current.setPlaybackRate === 'function') {
       try { ytPlayerRef.current.setPlaybackRate(playbackRate); } catch (_) {}
     }
   }, [playbackRate]);
 
-  // Phát bài hát YouTube 1 chạm tức thì
+  // Đồng bộ video MV khi người dùng bật / tắt chế độ xem MV
+  useEffect(() => {
+    if (ytPlayerRef.current) {
+      if (showVideo) {
+        try {
+          ytPlayerRef.current.mute();
+          if (audioRef.current) {
+            ytPlayerRef.current.seekTo(audioRef.current.currentTime, true);
+          }
+          if (isPlaying) {
+            ytPlayerRef.current.playVideo();
+          }
+        } catch (_) {}
+      } else {
+        try {
+          ytPlayerRef.current.pauseVideo();
+        } catch (_) {}
+      }
+    }
+  }, [showVideo, isPlaying]);
+
+  // Phát bài hát YouTube 1 chạm tức thì qua Luồng Phần Cứng iOS chuẩn
   const playSong = useCallback((song) => {
     if (!song) return;
     activateIosPlaybackSession();
@@ -372,55 +349,32 @@ export default function App() {
     setHistory((prev) => [song, ...prev.filter((s) => (s.videoId || s.id) !== (song.videoId || song.id))].slice(0, 50));
     updateMediaSession(song);
 
-    if (audioRef.current) {
-      audioRef.current.play().catch(() => {});
-    }
-
     const videoId = song.videoId || (song.id?.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
     if (!videoId) return;
 
-    if (ytPlayerRef.current && isYtReadyRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
+    // Nạp luồng âm thanh trực tiếp (Apple Lossless / AAC CoreAudio)
+    if (audioRef.current) {
+      const streamUrl = `${API}/stream/${videoId}`;
+      audioRef.current.src = streamUrl;
+      audioRef.current.playbackRate = playbackRate;
+      audioRef.current.load();
+      audioRef.current.play().then(() => {
+        setIsPlaying(true);
+        setLoadingTrack(false);
+      }).catch((err) => {
+        console.warn('Audio play error, retrying:', err.message);
+      });
+    }
+
+    // Nếu đang xem MV, nạp video tương ứng
+    if (showVideo && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
       try {
         ytPlayerRef.current.loadVideoById(videoId);
+        ytPlayerRef.current.mute();
         ytPlayerRef.current.playVideo();
       } catch (_) {}
-    } else {
-      let tries = 0;
-      const checkYt = setInterval(() => {
-        tries += 1;
-        if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
-          clearInterval(checkYt);
-          try {
-            ytPlayerRef.current.loadVideoById(videoId);
-            ytPlayerRef.current.playVideo();
-          } catch (_) {}
-        } else if (tries > 25) {
-          clearInterval(checkYt);
-          setLoadingTrack(false);
-        }
-      }, 150);
     }
-  }, []);
-
-  // Cập nhật thanh tiến trình theo thời gian thực của YouTube
-  useEffect(() => {
-    let interval = null;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
-          try {
-            const t = ytPlayerRef.current.getCurrentTime();
-            if (t != null && !Number.isNaN(t)) setCurrentTime(t);
-            const d = ytPlayerRef.current.getDuration();
-            if (d != null && !Number.isNaN(d) && d > 0) setDuration(d);
-          } catch (_) {}
-        }
-      }, 400);
-    }
-    return () => {
-      if (interval) clearInterval(interval);
-    };
-  }, [isPlaying]);
+  }, [playbackRate, showVideo]);
 
   const togglePlay = () => {
     activateIosPlaybackSession();
@@ -429,31 +383,43 @@ export default function App() {
       return;
     }
 
-    if (ytPlayerRef.current) {
+    if (audioRef.current) {
       if (isPlaying) {
-        try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
-        if (audioRef.current) audioRef.current.pause();
+        audioRef.current.pause();
         setIsPlaying(false);
+        if (ytPlayerRef.current) {
+          try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
+        }
       } else {
-        try { ytPlayerRef.current.playVideo(); } catch (_) {}
-        if (audioRef.current) audioRef.current.play().catch(() => {});
-        setIsPlaying(true);
+        audioRef.current.play().then(() => {
+          setIsPlaying(true);
+        }).catch(() => {});
+        if (showVideo && ytPlayerRef.current) {
+          try {
+            ytPlayerRef.current.mute();
+            ytPlayerRef.current.seekTo(audioRef.current.currentTime, true);
+            ytPlayerRef.current.playVideo();
+          } catch (_) {}
+        }
       }
     }
   };
 
   // Kéo thanh tiến trình tua bài hát mượt mà
   const handleSeek = (e) => {
-    if (!progressBarRef.current || !duration || !ytPlayerRef.current) return;
+    if (!progressBarRef.current || !duration) return;
     const rect = progressBarRef.current.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width));
     const ratio = clickX / rect.width;
     const targetTime = ratio * duration;
-    try {
-      ytPlayerRef.current.seekTo(targetTime, true);
-      setCurrentTime(targetTime);
-    } catch (_) {}
+    setCurrentTime(targetTime);
+    if (audioRef.current) {
+      audioRef.current.currentTime = targetTime;
+    }
+    if (showVideo && ytPlayerRef.current) {
+      try { ytPlayerRef.current.seekTo(targetTime, true); } catch (_) {}
+    }
   };
 
   // Đổi tốc độ phát
@@ -899,13 +865,47 @@ export default function App() {
             </button>
           </div>
 
-          {/* LUỒNG CARRIER ÂM THANH PHẦN CỨNG GIỮ PHÁT NỀN IOS KHI TẮT MÀN HÌNH */}
+          {/* LUỒNG ÂM THANH PHẦN CỨNG APPLE LOSSLESS / AAC NGUYÊN BẢN (CHẠY NỀN LIÊN TỤC KHI TẮT MÀN HÌNH) */}
           <audio
             ref={audioRef}
             playsInline
-            loop
             preload="auto"
-            src={SILENT_CARRIER_AUDIO}
+            onTimeUpdate={() => {
+              if (audioRef.current) {
+                const t = audioRef.current.currentTime;
+                if (t != null && !Number.isNaN(t)) setCurrentTime(t);
+              }
+            }}
+            onLoadedMetadata={() => {
+              if (audioRef.current) {
+                const d = audioRef.current.duration;
+                if (d && !Number.isNaN(d) && d > 0) setDuration(d);
+              }
+            }}
+            onPlaying={() => {
+              setIsPlaying(true);
+              setLoadingTrack(false);
+            }}
+            onWaiting={() => {
+              setLoadingTrack(true);
+            }}
+            onPause={() => {
+              setIsPlaying(false);
+            }}
+            onEnded={() => {
+              if (loopModeRef.current === 'one') {
+                if (audioRef.current) {
+                  audioRef.current.currentTime = 0;
+                  audioRef.current.play().catch(() => {});
+                }
+              } else {
+                nextSong();
+              }
+            }}
+            onError={(e) => {
+              console.warn('Audio stream error:', e);
+              setLoadingTrack(false);
+            }}
             style={{ display: 'none' }}
           />
         </section>

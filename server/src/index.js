@@ -364,12 +364,60 @@ const youtubedl = require('youtube-dl-exec');
 
 const directAudioCache = new Map();
 
+const INVIDIOUS_INSTANCES = [
+  'https://yt.chocolatemoo53.com',
+  'https://invidious.nerdvpn.de',
+  'https://inv.nadeko.net'
+];
+
+async function fetchInvidiousAudio(videoId) {
+  for (const inst of INVIDIOUS_INSTANCES) {
+    try {
+      const data = await new Promise((resolve, reject) => {
+        const req = https.get(`${inst}/api/v1/videos/${videoId}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)' },
+          timeout: 4500
+        }, (res) => {
+          let b = '';
+          res.on('data', (c) => b += c);
+          res.on('end', () => {
+            if (res.statusCode === 200) {
+              try { resolve(JSON.parse(b)); } catch (e) { reject(e); }
+            } else {
+              reject(new Error(`Status ${res.statusCode}`));
+            }
+          });
+        });
+        req.on('error', reject);
+        req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+      });
+
+      const audio = (data.adaptiveFormats || []).find((f) => f.type && (f.type.includes('audio/mp4') || f.type.startsWith('audio/')));
+      if (audio && audio.url) {
+        return audio.url;
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 async function resolveDirectAudioUrl(videoId) {
   const cached = directAudioCache.get(videoId);
   if (cached && cached.expireAt > Date.now()) {
     return cached.url;
   }
 
+  // 1. Thử qua Invidious API tốc độ cao, vượt tường lửa Render Datacenter
+  const invidiousUrl = await fetchInvidiousAudio(videoId);
+  if (invidiousUrl && invidiousUrl.startsWith('http')) {
+    directAudioCache.set(videoId, {
+      url: invidiousUrl,
+      expireAt: Date.now() + 4 * 3600 * 1000 // 4 tiếng
+    });
+    return invidiousUrl;
+  }
+
+  // 2. Thử qua youtube-dl-exec (môi trường residential)
   try {
     const raw = await youtubedl(`https://www.youtube.com/watch?v=${videoId}`, {
       getUrl: true,
@@ -453,6 +501,21 @@ function pipeAudioFromUrl(targetUrl, req, res, fallbackFn) {
 
   doRequest(targetUrl);
 }
+
+app.get('/api/audio-info/:idOrVideoId', async (req, res) => {
+  let videoId = req.params.idOrVideoId;
+  if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
+
+  try {
+    const directUrl = await resolveDirectAudioUrl(videoId);
+    if (directUrl) {
+      return res.json({ success: true, videoId, url: directUrl, streamUrl: `/api/stream/${videoId}` });
+    }
+    return res.status(404).json({ success: false, error: 'Không tìm thấy luồng âm thanh YouTube' });
+  } catch (err) {
+    return res.status(500).json({ success: false, error: err.message });
+  }
+});
 
 app.get('/api/stream/:idOrVideoId', async (req, res) => {
   let videoId = req.params.idOrVideoId;
