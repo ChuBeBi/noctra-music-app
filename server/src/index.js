@@ -341,20 +341,10 @@ app.delete('/api/songs/:id', (req, res) => {
 });
 
 // ============================================================================
-// HỆ THỐNG TRUYỀN ÂM THANH YOUTUBE TỐC ĐỘ CAO (ZERO-LATENCY STREAMING)
+// HỆ THỐNG TRUYỀN ÂM THANH YOUTUBE NGUYÊN BẢN (HARDWARE M4A / HTTP 206 CHUẨN IOS)
 // ============================================================================
 
-const DIRECT_STREAM_SERVERS = [
-  'https://inv.nadeko.net',
-  'https://invidious.nerdvpn.de',
-  'https://yt.artemislena.eu',
-  'https://invidious.jing.rocks',
-  'https://iv.ggtyler.dev',
-  'https://invidious.private.coffee',
-  'https://invidious.drgns.space',
-  'https://invidious.lunar.icu',
-  'https://invidious.perennialte.ch'
-];
+const youtubedl = require('youtube-dl-exec');
 
 const FULL_LENGTH_FALLBACKS = [
   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
@@ -362,26 +352,126 @@ const FULL_LENGTH_FALLBACKS = [
   'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'
 ];
 
-/**
- * GET /api/stream/:idOrVideoId
- * Phản hồi 302 Found tức thì (trong 5ms) điều hướng thẳng tới luồng âm thanh itag 140 m4a.
- * Giúp iPhone Safari kết nối trực tiếp tới CDN bằng mạng 4G/Wi-Fi bản địa mà không bị nghẽn qua server Render.
- * Tốc độ tải giảm từ 15 giây xuống dưới 0.3 giây!
- */
-app.get('/api/stream/:idOrVideoId', (req, res) => {
+const directAudioCache = new Map();
+
+async function resolveDirectAudioUrl(videoId) {
+  const cached = directAudioCache.get(videoId);
+  if (cached && cached.expireAt > Date.now()) {
+    return cached.url;
+  }
+
+  try {
+    const raw = await youtubedl(`https://www.youtube.com/watch?v=${videoId}`, {
+      getUrl: true,
+      format: 'bestaudio[ext=m4a]/bestaudio/best',
+      noWarnings: true,
+      noCheckCertificates: true
+    });
+    const url = String(raw || '').trim();
+    if (url && url.startsWith('http')) {
+      directAudioCache.set(videoId, {
+        url,
+        expireAt: Date.now() + 4 * 3600 * 1000 // 4 tiếng
+      });
+      return url;
+    }
+  } catch (err) {
+    console.warn(`[resolveDirectAudioUrl] ytdl-exec error for ${videoId}:`, err.message);
+  }
+  return null;
+}
+
+function pipeAudioFromUrl(targetUrl, req, res, fallbackFn) {
+  const rangeHeader = req.headers.range;
+  const forwardHeaders = {
+    'User-Agent': req.headers['user-agent'] || 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X)',
+    Accept: '*/*'
+  };
+  if (rangeHeader) {
+    forwardHeaders['Range'] = rangeHeader;
+  }
+
+  function doRequest(u, redirectCount = 0) {
+    if (redirectCount > 5) {
+      if (typeof fallbackFn === 'function') return fallbackFn();
+      return res.status(502).end();
+    }
+
+    const client = u.startsWith('https') ? https : http;
+    const streamReq = client.get(
+      u,
+      { headers: forwardHeaders, agent: u.startsWith('https') ? httpsAgent : httpAgent },
+      (streamRes) => {
+        if (streamRes.statusCode >= 300 && streamRes.statusCode < 400 && streamRes.headers.location) {
+          streamRes.resume();
+          return doRequest(streamRes.headers.location, redirectCount + 1);
+        }
+
+        if (streamRes.statusCode >= 400) {
+          streamRes.resume();
+          console.warn(`[pipeAudioFromUrl] Upstream status ${streamRes.statusCode}`);
+          if (typeof fallbackFn === 'function') return fallbackFn();
+          return res.status(streamRes.statusCode).end();
+        }
+
+        const passHeaders = {
+          'Access-Control-Allow-Origin': '*',
+          'Content-Type': streamRes.headers['content-type'] || 'audio/mp4',
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'public, max-age=3600'
+        };
+        if (streamRes.headers['content-length']) passHeaders['Content-Length'] = streamRes.headers['content-length'];
+        if (streamRes.headers['content-range']) passHeaders['Content-Range'] = streamRes.headers['content-range'];
+
+        res.writeHead(streamRes.statusCode, passHeaders);
+        streamRes.pipe(res);
+
+        req.on('close', () => {
+          streamRes.destroy();
+        });
+      }
+    );
+
+    streamReq.on('error', (err) => {
+      console.warn('[pipeAudioFromUrl] Request error:', err.message);
+      if (!res.headersSent && typeof fallbackFn === 'function') {
+        fallbackFn();
+      }
+    });
+  }
+
+  doRequest(targetUrl);
+}
+
+app.get('/api/stream/:idOrVideoId', async (req, res) => {
   let videoId = req.params.idOrVideoId;
   if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
 
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Cache-Control', 'public, max-age=3600');
+  const fallbackAudio = () => {
+    if (res.headersSent || res.writableEnded) return;
+    const fallback = FULL_LENGTH_FALLBACKS[0];
+    pipeAudioFromUrl(fallback, req, res, () => {
+      if (!res.headersSent) res.status(500).json({ error: 'Audio stream failed' });
+    });
+  };
 
-  // Fallback an toàn tới luồng âm thanh đầy đủ
-  const fallback = FULL_LENGTH_FALLBACKS[0];
-  return res.redirect(302, fallback);
+  try {
+    const directUrl = await resolveDirectAudioUrl(videoId);
+    if (directUrl) {
+      return pipeAudioFromUrl(directUrl, req, res, fallbackAudio);
+    }
+    return fallbackAudio();
+  } catch (err) {
+    console.error('Lỗi truyền luồng âm thanh:', err.message);
+    return fallbackAudio();
+  }
 });
 
 // Nạp trước nhẹ nhàng
-app.get('/api/prefetch/:idOrVideoId', (_req, res) => {
+app.get('/api/prefetch/:idOrVideoId', async (req, res) => {
+  let videoId = req.params.idOrVideoId;
+  if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
+  resolveDirectAudioUrl(videoId).catch(() => {});
   res.json({ ok: true });
 });
 
