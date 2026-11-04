@@ -362,12 +362,6 @@ app.delete('/api/songs/:id', (req, res) => {
 
 const youtubedl = require('youtube-dl-exec');
 
-const FULL_LENGTH_FALLBACKS = [
-  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
-  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
-  'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3'
-];
-
 const directAudioCache = new Map();
 
 async function resolveDirectAudioUrl(videoId) {
@@ -379,8 +373,8 @@ async function resolveDirectAudioUrl(videoId) {
   try {
     const raw = await youtubedl(`https://www.youtube.com/watch?v=${videoId}`, {
       getUrl: true,
-      format: 'bestaudio[ext=m4a]/bestaudio/best',
-      extractorArgs: 'youtube:player_client=ios,android,web',
+      format: '140/bestaudio/best',
+      extractorArgs: 'youtube:player_client=android',
       noWarnings: true,
       noCheckCertificates: true
     });
@@ -464,23 +458,17 @@ app.get('/api/stream/:idOrVideoId', async (req, res) => {
   let videoId = req.params.idOrVideoId;
   if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
 
-  const fallbackAudio = () => {
-    if (res.headersSent || res.writableEnded) return;
-    const fallback = FULL_LENGTH_FALLBACKS[0];
-    pipeAudioFromUrl(fallback, req, res, () => {
-      if (!res.headersSent) res.status(500).json({ error: 'Audio stream failed' });
-    });
-  };
-
   try {
     const directUrl = await resolveDirectAudioUrl(videoId);
     if (directUrl) {
-      return pipeAudioFromUrl(directUrl, req, res, fallbackAudio);
+      return pipeAudioFromUrl(directUrl, req, res, () => {
+        if (!res.headersSent) res.status(502).json({ error: 'Direct audio stream error' });
+      });
     }
-    return fallbackAudio();
+    return res.status(404).json({ error: 'YouTube audio not found' });
   } catch (err) {
     console.error('Lỗi truyền luồng âm thanh:', err.message);
-    return fallbackAudio();
+    return res.status(500).json({ error: 'Internal stream error' });
   }
 });
 

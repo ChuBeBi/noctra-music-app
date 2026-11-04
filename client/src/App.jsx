@@ -316,6 +316,8 @@ export default function App() {
   const handleAudioError = (e) => {
     console.warn('Audio tag error:', e);
     setLoadingTrack(false);
+    showToast('Đang kết nối bài tiếp theo...');
+    setTimeout(() => nextSong(), 1200);
   };
 
   const togglePlay = () => {
