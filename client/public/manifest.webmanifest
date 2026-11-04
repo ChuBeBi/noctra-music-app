@@ -1,0 +1,10 @@
+{
+  "name": "NOCTRA Music",
+  "short_name": "NOCTRA",
+  "description": "Không gian âm nhạc tối giản",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0c0f",
+  "theme_color": "#0b0c0f",
+  "icons": []
+}
