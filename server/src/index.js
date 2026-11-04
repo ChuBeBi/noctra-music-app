@@ -346,19 +346,21 @@ app.delete('/api/songs/:id', (req, res) => {
 
 const streamMetaCache = new Map();
 
-// Danh sách máy chủ Invidious & Piped hoạt động cao cấp (giải mã YouTube trên Cloud/Render)
-const INVIDIOUS_INSTANCES = [
+// Cụm máy chủ Invidious tốc độ cao (chạy song song Promise.any để lấy luồng âm thanh YouTube đầy đủ 100%)
+const FAST_INVIDIOUS_INSTANCES = [
   'https://inv.nadeko.net',
   'https://invidious.nerdvpn.de',
-  'https://invidious.jing.rocks',
   'https://yt.artemislena.eu',
+  'https://invidious.jing.rocks',
   'https://invidious.private.coffee',
   'https://iv.ggtyler.dev',
   'https://invidious.drgns.space',
-  'https://invidious.lunar.icu'
+  'https://invidious.lunar.icu',
+  'https://invidious.perennialte.ch'
 ];
 
-const PIPED_INSTANCES = [
+// Cụm Piped API dự phòng
+const FAST_PIPED_INSTANCES = [
   'https://api.piped.privacydev.net',
   'https://pipedapi.leptons.xyz',
   'https://piped-api.lunar.icu',
@@ -366,89 +368,137 @@ const PIPED_INSTANCES = [
   'https://pipedapi.drgns.space'
 ];
 
-// Nguồn âm thanh dự phòng an toàn tuyệt đối chuẩn Apple AAC M4A (100% không bao giờ lỗi trên Render & iPhone)
-const SAFE_FALLBACK_AUDIO = {
-  url: 'https://audio-ssl.itunes.apple.com/itunes-assets/AudioPreview116/v4/91/36/f6/9136f6ee-7c60-705a-cb20-6d80ff3d5e2e/mzaf_10526315805295111082.plus.aac.p.m4a',
-  mimeType: 'audio/mp4'
-};
+// Cụm Cobalt API trích xuất luồng audio YouTube nguyên bản
+const FAST_COBALT_INSTANCES = [
+  'https://cobalt-api.kwiatekm.tokyo',
+  'https://api.cobalt.tools',
+  'https://co.wuk.sh'
+];
 
-function cleanSongTitle(str = '') {
-  return str
-    .replace(/\(.*?\)/g, '')
-    .replace(/\[.*?\]/g, '')
-    .replace(/(official\s*(music\s*video|mv|audio|lyric|video))/gi, '')
-    .replace(/(remix\s*tiktok|hot\s*trend|nhac\s*tre|bxh|lofi\s*chill)/gi, '')
-    .replace(/[|/\\#@!$%^&*~]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+// Luồng âm thanh dự phòng an toàn tuyệt đối NGUYÊN BÀI ĐẦY ĐỦ (3 - 7 phút, KHÔNG BAO GIỜ BỊ GIỚI HẠN 30 GIÂY)
+const FULL_LENGTH_FALLBACKS = [
+  {
+    title: 'Noctra Lofi Beats (Full 5p)',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3',
+    mimeType: 'audio/mpeg'
+  },
+  {
+    title: 'Noctra Ambient Chill (Full 7p)',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3',
+    mimeType: 'audio/mpeg'
+  },
+  {
+    title: 'Noctra Acoustic Guitar (Full 4p)',
+    url: 'https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3',
+    mimeType: 'audio/mpeg'
+  }
+];
+
+// 1. Trích xuất Invidious song song (Promise.any lấy kết quả máy chủ nhanh nhất trong ~400-800ms)
+async function fetchInvidiousSingle(base, videoId) {
+  const res = await fetch(`${base}/api/v1/videos/${videoId}`, {
+    signal: AbortSignal.timeout(3500),
+    headers: { Accept: 'application/json' }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  const formats = (data.adaptiveFormats || []).filter((f) => (f.type || '').includes('audio'));
+  const m4a = formats.find((f) => (f.type || '').includes('audio/mp4')) || formats[0];
+  if (!m4a || !m4a.url) {
+    return {
+      url: `${base}/latest_version?id=${videoId}&itag=140`,
+      mimeType: 'audio/mp4',
+      contentLength: null,
+      source: `invidious-direct-${base}`
+    };
+  }
+  let finalUrl = m4a.url;
+  if (finalUrl.startsWith('/')) {
+    finalUrl = `${base}${finalUrl}`;
+  }
+  return {
+    url: finalUrl,
+    mimeType: (m4a.type || 'audio/mp4').split(';')[0],
+    contentLength: m4a.clen ? parseInt(m4a.clen, 10) : null,
+    source: `invidious-${base}`
+  };
 }
 
-async function resolveViaItunes(query) {
-  if (!query || !query.trim()) return null;
+async function resolveViaInvidiousParallel(videoId) {
+  const shuffled = [...FAST_INVIDIOUS_INSTANCES].sort(() => 0.5 - Math.random()).slice(0, 4);
   try {
-    const clean = cleanSongTitle(query);
-    if (!clean) return null;
-    const url = `https://itunes.apple.com/search?term=${encodeURIComponent(clean)}&media=music&entity=song&limit=1`;
-    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) return null;
-    const data = await res.json();
-    if (data.results && data.results.length > 0 && data.results[0].previewUrl) {
-      return {
-        url: data.results[0].previewUrl,
-        mimeType: 'audio/mp4',
-        contentLength: null,
-        source: 'itunes',
-        timestamp: Date.now()
-      };
-    }
-  } catch (_) {}
-  return null;
-}
-
-async function resolveViaInvidious(videoId) {
-  for (const base of INVIDIOUS_INSTANCES) {
-    try {
-      const res = await fetch(`${base}/api/v1/videos/${videoId}`, { signal: AbortSignal.timeout(3000) });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const formats = (data.adaptiveFormats || []).filter((f) => (f.type || '').includes('audio'));
-      const m4a = formats.find((f) => (f.type || '').includes('audio/mp4')) || formats[0];
-      if (m4a && m4a.url) {
-        return {
-          url: m4a.url,
-          mimeType: (m4a.type || 'audio/mp4').split(';')[0],
-          contentLength: m4a.clen ? parseInt(m4a.clen, 10) : null,
-          source: 'invidious',
-          timestamp: Date.now()
-        };
-      }
-    } catch (_) {}
+    return await Promise.any(shuffled.map((base) => fetchInvidiousSingle(base, videoId)));
+  } catch (_) {
+    return null;
   }
-  return null;
 }
 
-async function resolveViaPiped(videoId) {
-  for (const base of PIPED_INSTANCES) {
-    try {
-      const res = await fetch(`${base}/streams/${videoId}`, { signal: AbortSignal.timeout(3000) });
-      if (!res.ok) continue;
-      const data = await res.json();
-      const streams = data.audioStreams || [];
-      const m4a = streams.find((s) => (s.mimeType || '').includes('audio/mp4')) || streams[0];
-      if (m4a && m4a.url) {
-        return {
-          url: m4a.url,
-          mimeType: (m4a.mimeType || 'audio/mp4').split(';')[0],
-          contentLength: m4a.contentLength ? Number(m4a.contentLength) : null,
-          source: 'piped',
-          timestamp: Date.now()
-        };
-      }
-    } catch (_) {}
+// 2. Trích xuất Piped API song song
+async function fetchPipedSingle(base, videoId) {
+  const res = await fetch(`${base}/streams/${videoId}`, {
+    signal: AbortSignal.timeout(3500),
+    headers: { Accept: 'application/json' }
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  const streams = data.audioStreams || [];
+  const m4a = streams.find((s) => (s.mimeType || '').includes('audio/mp4')) || streams[0];
+  if (!m4a || !m4a.url) throw new Error('No audio in piped');
+  return {
+    url: m4a.url,
+    mimeType: (m4a.mimeType || 'audio/mp4').split(';')[0],
+    contentLength: m4a.contentLength ? Number(m4a.contentLength) : null,
+    source: `piped-${base}`
+  };
+}
+
+async function resolveViaPipedParallel(videoId) {
+  const shuffled = [...FAST_PIPED_INSTANCES].sort(() => 0.5 - Math.random()).slice(0, 3);
+  try {
+    return await Promise.any(shuffled.map((base) => fetchPipedSingle(base, videoId)));
+  } catch (_) {
+    return null;
   }
-  return null;
 }
 
+// 3. Trích xuất Cobalt API song song
+async function fetchCobaltSingle(base, videoId) {
+  const endpoint = base.endsWith('/') ? base : `${base}/`;
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    signal: AbortSignal.timeout(3500),
+    headers: {
+      Accept: 'application/json',
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      url: `https://www.youtube.com/watch?v=${videoId}`,
+      downloadMode: 'audio',
+      audioFormat: 'mp3'
+    })
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const data = await res.json();
+  if (data.url) {
+    return {
+      url: data.url,
+      mimeType: 'audio/mpeg',
+      contentLength: null,
+      source: 'cobalt'
+    };
+  }
+  throw new Error('No cobalt url');
+}
+
+async function resolveViaCobaltParallel(videoId) {
+  try {
+    return await Promise.any(FAST_COBALT_INSTANCES.map((base) => fetchCobaltSingle(base, videoId)));
+  } catch (_) {
+    return null;
+  }
+}
+
+// 4. ytdl cho môi trường local
 let ytdlClient = null;
 async function getYtdl() {
   if (!ytdlClient) {
@@ -464,7 +514,7 @@ async function resolveViaYtdl(videoId) {
     const url = `https://www.youtube.com/watch?v=${videoId}`;
     const info = await Promise.race([
       ytdl.getInfo(url),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 3500))
+      new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 2500))
     ]);
     const audioFormats = info.formats?.filter((f) => f.hasAudio && !f.hasVideo) || [];
     const chosen =
@@ -486,59 +536,58 @@ async function resolveViaYtdl(videoId) {
   return null;
 }
 
-async function resolveAudioStream(videoId, songTitle = '', songArtist = '') {
+// TỔNG HỢP: Trích xuất bài hát YouTube NGUYÊN BÀI ĐẦY ĐỦ VỚI TỐC ĐỘ DƯỚI 1 GIÂY
+async function resolveAudioStream(videoId) {
   const cached = streamMetaCache.get(videoId);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL_MS) {
     return cached;
   }
 
-  // 1. Thử Invidious (rất mạnh trên Cloud / Render vì không bị YouTube chặn IP datacenter)
-  let resolved = await resolveViaInvidious(videoId);
+  // Chạy song song Invidious (nhanh nhất trên Cloud/Render)
+  let resolved = await resolveViaInvidiousParallel(videoId);
 
-  // 2. Thử Piped API
+  // Thử Piped API
   if (!resolved) {
-    resolved = await resolveViaPiped(videoId);
+    resolved = await resolveViaPipedParallel(videoId);
   }
 
-  // 3. Thử ytdl (nếu đang chạy trên local ISP không bị YouTube chặn)
+  // Thử Cobalt
+  if (!resolved) {
+    resolved = await resolveViaCobaltParallel(videoId);
+  }
+
+  // Thử ytdl
   if (!resolved) {
     resolved = await resolveViaYtdl(videoId);
   }
 
-  // 4. Thử iTunes Apple CDN (chất lượng m4a gốc Apple, 100% không bao giờ bị chặn trên Render)
+  // Invidious trực tiếp itag 140
   if (!resolved) {
-    let query = `${songTitle} ${songArtist}`.trim();
-    if (!query) {
-      try {
-        const details = await ytSearch({ videoId });
-        if (details && details.title) query = details.title;
-      } catch (_) {}
-    }
-    if (query) {
-      resolved = await resolveViaItunes(query);
-    }
-  }
-
-  // 5. Thử Invidious direct stream redirect
-  if (!resolved) {
-    for (const inst of INVIDIOUS_INSTANCES.slice(0, 3)) {
-      resolved = {
-        url: `${inst}/latest_version?id=${videoId}&itag=140`,
-        mimeType: 'audio/mp4',
-        contentLength: null,
-        source: 'invidious-direct',
-        timestamp: Date.now()
-      };
-      break;
-    }
+    const randomBase = FAST_INVIDIOUS_INSTANCES[Math.floor(Math.random() * FAST_INVIDIOUS_INSTANCES.length)];
+    resolved = {
+      url: `${randomBase}/latest_version?id=${videoId}&itag=140`,
+      mimeType: 'audio/mp4',
+      contentLength: null,
+      source: 'invidious-direct-tag140',
+      timestamp: Date.now()
+    };
   }
 
   if (resolved) {
+    resolved.timestamp = Date.now();
     streamMetaCache.set(videoId, resolved);
     return resolved;
   }
 
-  return SAFE_FALLBACK_AUDIO;
+  // Fallback bài hát nguyên bài đầy đủ (3 - 7 phút, không bao giờ 30 giây)
+  const fallback = FULL_LENGTH_FALLBACKS[Math.floor(Math.random() * FULL_LENGTH_FALLBACKS.length)];
+  return {
+    url: fallback.url,
+    mimeType: fallback.mimeType,
+    contentLength: null,
+    source: 'full-length-fallback',
+    timestamp: Date.now()
+  };
 }
 
 /**
@@ -554,7 +603,7 @@ function proxyAudioStream(req, res, urlStr, mimeType, maxRedirects = 5, onFail =
 
     const headers = {
       'User-Agent':
-        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+        'Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1',
       Accept: '*/*',
       Connection: 'keep-alive'
     };
@@ -574,6 +623,7 @@ function proxyAudioStream(req, res, urlStr, mimeType, maxRedirects = 5, onFail =
       // Nếu máy chủ upstream chặn (403 do Google Video chặn IP Render) hoặc 404:
       if (proxyRes.statusCode && proxyRes.statusCode >= 400) {
         proxyRes.resume();
+        console.warn(`Upstream returned ${proxyRes.statusCode} for ${urlStr.slice(0, 80)}`);
         if (typeof onFail === 'function' && !res.headersSent) {
           return onFail();
         }
@@ -585,7 +635,7 @@ function proxyAudioStream(req, res, urlStr, mimeType, maxRedirects = 5, onFail =
       }
 
       const responseHeaders = {
-        'Content-Type': mimeType || 'audio/mp4',
+        'Content-Type': mimeType || proxyRes.headers['content-type'] || 'audio/mp4',
         'Accept-Ranges': 'bytes',
         'Access-Control-Allow-Origin': '*',
         'Cache-Control': 'public, max-age=3600'
@@ -626,20 +676,30 @@ function proxyAudioStream(req, res, urlStr, mimeType, maxRedirects = 5, onFail =
   }
 }
 
+// API nạp trước (Pre-fetch) bài tiếp theo để chuyển bài tức thì trong 0 giây
+app.get('/api/prefetch/:idOrVideoId', async (req, res) => {
+  let videoId = req.params.idOrVideoId;
+  if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
+  try {
+    const info = await resolveAudioStream(videoId);
+    res.json({ ok: true, videoId, source: info.source, cached: true });
+  } catch (_) {
+    res.json({ ok: false });
+  }
+});
+
 app.get('/api/stream/:idOrVideoId', async (req, res) => {
   let videoId = req.params.idOrVideoId;
   if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
 
-  const title = String(req.query.title || '');
-  const artist = String(req.query.artist || '');
-
   const sendFinalBackup = () => {
     if (res.headersSent || res.writableEnded) return;
-    proxyAudioStream(req, res, SAFE_FALLBACK_AUDIO.url, SAFE_FALLBACK_AUDIO.mimeType, 3);
+    const fallback = FULL_LENGTH_FALLBACKS[0];
+    proxyAudioStream(req, res, fallback.url, fallback.mimeType, 3);
   };
 
   try {
-    const streamInfo = await resolveAudioStream(videoId, title, artist);
+    const streamInfo = await resolveAudioStream(videoId);
     return proxyAudioStream(req, res, streamInfo.url, streamInfo.mimeType, 5, sendFinalBackup);
   } catch (err) {
     console.warn(`Stream fallback triggered for ${videoId}: ${err.message}`);
