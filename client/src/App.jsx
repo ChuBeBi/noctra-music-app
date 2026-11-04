@@ -336,6 +336,25 @@ export default function App() {
     } catch (_) {}
   }, [nextSong, previousSong]);
 
+  // Đồng bộ trạng thái phát lên hệ thống iOS MediaSession
+  useEffect(() => {
+    if ('mediaSession' in navigator) {
+      navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
+    }
+  }, [isPlaying]);
+
+  useEffect(() => {
+    if ('mediaSession' in navigator && 'setPositionState' in navigator.mediaSession && duration > 0) {
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: Math.max(0, duration),
+          playbackRate: playbackRate,
+          position: Math.min(Math.max(0, currentTime), duration)
+        });
+      } catch (_) {}
+    }
+  }, [currentTime, duration, playbackRate]);
+
   // Cài đặt tốc độ phát
   useEffect(() => {
     if (ytPlayerRef.current && typeof ytPlayerRef.current.setPlaybackRate === 'function') {
@@ -890,6 +909,14 @@ export default function App() {
             style={{ display: 'none' }}
           />
         </section>
+
+        {/* HƯỚNG DẪN PHÁT NGẦM KHI THOÁT RA HOẶC TẮT MÀN HÌNH IPHONE */}
+        <div style={styles.iosTipCard}>
+          <span style={styles.iosTipIcon}>💡</span>
+          <span style={styles.iosTipText}>
+            <strong>Phát nhạc khi thoát ứng dụng / Khóa máy:</strong> Nếu vừa vuốt về Home hoặc tắt màn hình mà nhạc tạm dừng, bạn chỉ cần <strong>nhấn nút ▶ (Phát) trên Màn hình khóa hoặc Trung tâm điều khiển (Control Center)</strong> là nhạc sẽ tiếp tục phát ngầm 100%!
+          </span>
+        </div>
 
         {/* THANH TÌM KIẾM YOUTUBE OMNI-SEARCH */}
         <div style={styles.searchWrap}>
@@ -1569,6 +1596,25 @@ const styles = {
     justifyContent: 'center',
     cursor: 'pointer',
     boxShadow: '0 8px 24px rgba(168, 85, 247, 0.45)'
+  },
+  iosTipCard: {
+    display: 'flex',
+    gap: 10,
+    alignItems: 'flex-start',
+    padding: '10px 14px',
+    background: 'rgba(56, 189, 248, 0.08)',
+    border: '1px solid rgba(56, 189, 248, 0.2)',
+    borderRadius: 14,
+    marginBottom: 16
+  },
+  iosTipIcon: {
+    fontSize: 16,
+    lineHeight: 1.4
+  },
+  iosTipText: {
+    fontSize: 12,
+    lineHeight: 1.5,
+    color: '#94a3b8'
   },
   hardwareCapsule: {
     display: 'flex',
