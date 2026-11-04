@@ -1,6 +1,6 @@
 {
   "name": "noctra-music-app",
-  "version": "1.0.0",
+  "version": "3.0.0",
   "private": true,
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix client install",
@@ -8,7 +8,7 @@
     "start": "node server/src/index.js",
     "dev": "concurrently \"npm run server\" \"npm run client\"",
     "server": "npm --prefix server run dev",
-    "client": "npm --prefix client run dev"
+    "client": "npm --prefix client run dev -- --host"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

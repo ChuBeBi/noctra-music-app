@@ -8,7 +8,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="NOCTRA" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>NOCTRA Pro — iOS Background Music</title>
+    <title>NOCTRA — Nghe nhạc tắt màn hình iPhone</title>
     <style>
       * {
         -webkit-tap-highlight-color: transparent;
@@ -20,29 +20,14 @@
         background: #07080d;
         color: #f8fafc;
         overscroll-behavior-y: none;
-        user-select: none;
-        -webkit-user-select: none;
       }
       input, button {
         font-family: inherit;
-        user-select: text;
-        -webkit-user-select: text;
-      }
-      ::-webkit-scrollbar {
-        width: 0px;
-        height: 0px;
       }
     </style>
   </head>
   <body>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
-    <script>
-      if ('serviceWorker' in navigator) {
-        window.addEventListener('load', () => {
-          navigator.serviceWorker.register('/sw.js').catch(() => {});
-        });
-      }
-    </script>
   </body>
 </html>

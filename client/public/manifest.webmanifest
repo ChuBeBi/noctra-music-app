@@ -1,7 +1,7 @@
 {
-  "name": "NOCTRA Pro Music",
+  "name": "NOCTRA Music iOS",
   "short_name": "NOCTRA",
-  "description": "Trình phát nhạc nền thông minh tối ưu cho iPhone Lock Screen",
+  "description": "Trình phát nhạc nền khi tắt màn hình iPhone",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#07080d",
