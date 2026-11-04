@@ -223,13 +223,45 @@ export default function App() {
             events: {
               onReady: () => {
                 isYtReadyRef.current = true;
-                try { ytPlayerRef.current.mute(); } catch (_) {}
+                try {
+                  ytPlayerRef.current.unMute();
+                  ytPlayerRef.current.setVolume(100);
+                } catch (_) {}
               },
               onStateChange: (event) => {
-                if (event.data === 0) {
-                  // Hết video MV -> chuyển bài
-                  nextSong();
+                // 1 = PLAYING (Phát nhạc thành công trên mọi thiết bị)
+                if (event.data === 1) {
+                  setIsPlaying(true);
+                  setLoadingTrack(false);
+                  const d = event.target.getDuration();
+                  if (d && !Number.isNaN(d) && d > 0) setDuration(d);
+                  if (currentRef.current) updateMediaSession(currentRef.current);
+                } else if (event.data === 2) {
+                  // 2 = PAUSED
+                  setIsPlaying(false);
+                } else if (event.data === 0) {
+                  // 0 = ENDED (Tự động chuyển bài tiếp theo)
+                  if (loopModeRef.current === 'one') {
+                    event.target.seekTo(0);
+                    event.target.playVideo();
+                  } else {
+                    nextSong();
+                  }
+                } else if (event.data === 3) {
+                  // 3 = BUFFERING
+                  setLoadingTrack(true);
+                } else if (event.data === 5) {
+                  // 5 = CUED -> kích hoạt phát
+                  try {
+                    event.target.unMute();
+                    event.target.playVideo();
+                  } catch (_) {}
                 }
+              },
+              onError: (err) => {
+                console.warn('YouTube Player error code:', err.data);
+                showToast('Video YouTube hạn chế nhúng, đang chuyển bài kế...');
+                setTimeout(() => nextSong(), 1000);
               }
             }
           });
@@ -267,22 +299,29 @@ export default function App() {
     if (!('mediaSession' in navigator)) return;
     try {
       navigator.mediaSession.setActionHandler('play', () => {
-        if (audioRef.current) {
-          audioRef.current.play().catch(() => {});
+        if (ytPlayerRef.current) {
+          try {
+            ytPlayerRef.current.unMute();
+            ytPlayerRef.current.playVideo();
+          } catch (_) {}
         }
         setIsPlaying(true);
       });
       navigator.mediaSession.setActionHandler('pause', () => {
-        if (audioRef.current) {
-          audioRef.current.pause();
+        if (ytPlayerRef.current) {
+          try {
+            ytPlayerRef.current.pauseVideo();
+          } catch (_) {}
         }
         setIsPlaying(false);
       });
       navigator.mediaSession.setActionHandler('previoustrack', () => previousSong());
       navigator.mediaSession.setActionHandler('nexttrack', () => nextSong());
       navigator.mediaSession.setActionHandler('seekto', (details) => {
-        if (details.seekTime != null && audioRef.current) {
-          audioRef.current.currentTime = details.seekTime;
+        if (details.seekTime != null && ytPlayerRef.current) {
+          try {
+            ytPlayerRef.current.seekTo(details.seekTime, true);
+          } catch (_) {}
           setCurrentTime(details.seekTime);
         }
       });
@@ -310,36 +349,32 @@ export default function App() {
 
   // Cài đặt tốc độ phát
   useEffect(() => {
-    if (audioRef.current) {
-      audioRef.current.playbackRate = playbackRate;
-    }
     if (ytPlayerRef.current && typeof ytPlayerRef.current.setPlaybackRate === 'function') {
       try { ytPlayerRef.current.setPlaybackRate(playbackRate); } catch (_) {}
     }
   }, [playbackRate]);
 
-  // Đồng bộ video MV khi người dùng bật / tắt chế độ xem MV
+  // Cập nhật thanh tiến trình theo thời gian thực của YouTube Engine
   useEffect(() => {
-    if (ytPlayerRef.current) {
-      if (showVideo) {
-        try {
-          ytPlayerRef.current.mute();
-          if (audioRef.current) {
-            ytPlayerRef.current.seekTo(audioRef.current.currentTime, true);
-          }
-          if (isPlaying) {
-            ytPlayerRef.current.playVideo();
-          }
-        } catch (_) {}
-      } else {
-        try {
-          ytPlayerRef.current.pauseVideo();
-        } catch (_) {}
-      }
+    let interval = null;
+    if (isPlaying) {
+      interval = setInterval(() => {
+        if (ytPlayerRef.current && typeof ytPlayerRef.current.getCurrentTime === 'function') {
+          try {
+            const t = ytPlayerRef.current.getCurrentTime();
+            if (t != null && !Number.isNaN(t)) setCurrentTime(t);
+            const d = ytPlayerRef.current.getDuration();
+            if (d != null && !Number.isNaN(d) && d > 0) setDuration(d);
+          } catch (_) {}
+        }
+      }, 350);
     }
-  }, [showVideo, isPlaying]);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [isPlaying]);
 
-  // Phát bài hát YouTube 1 chạm tức thì qua Luồng Phần Cứng iOS chuẩn
+  // Phát bài hát YouTube 1 chạm tức thì
   const playSong = useCallback((song) => {
     if (!song) return;
     activateIosPlaybackSession();
@@ -352,29 +387,32 @@ export default function App() {
     const videoId = song.videoId || (song.id?.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
     if (!videoId) return;
 
-    // Nạp luồng âm thanh trực tiếp (Apple Lossless / AAC CoreAudio)
-    if (audioRef.current) {
-      const streamUrl = `${API}/stream/${videoId}`;
-      audioRef.current.src = streamUrl;
-      audioRef.current.playbackRate = playbackRate;
-      audioRef.current.load();
-      audioRef.current.play().then(() => {
-        setIsPlaying(true);
-        setLoadingTrack(false);
-      }).catch((err) => {
-        console.warn('Audio play error, retrying:', err.message);
-      });
-    }
-
-    // Nếu đang xem MV, nạp video tương ứng
-    if (showVideo && ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
+    if (ytPlayerRef.current && isYtReadyRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
       try {
+        ytPlayerRef.current.unMute();
+        ytPlayerRef.current.setVolume(100);
         ytPlayerRef.current.loadVideoById(videoId);
-        ytPlayerRef.current.mute();
         ytPlayerRef.current.playVideo();
       } catch (_) {}
+    } else {
+      let tries = 0;
+      const checkYt = setInterval(() => {
+        tries += 1;
+        if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
+          clearInterval(checkYt);
+          try {
+            ytPlayerRef.current.unMute();
+            ytPlayerRef.current.setVolume(100);
+            ytPlayerRef.current.loadVideoById(videoId);
+            ytPlayerRef.current.playVideo();
+          } catch (_) {}
+        } else if (tries > 25) {
+          clearInterval(checkYt);
+          setLoadingTrack(false);
+        }
+      }, 150);
     }
-  }, [playbackRate, showVideo]);
+  }, []);
 
   const togglePlay = () => {
     activateIosPlaybackSession();
@@ -383,43 +421,32 @@ export default function App() {
       return;
     }
 
-    if (audioRef.current) {
+    if (ytPlayerRef.current) {
       if (isPlaying) {
-        audioRef.current.pause();
+        try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
         setIsPlaying(false);
-        if (ytPlayerRef.current) {
-          try { ytPlayerRef.current.pauseVideo(); } catch (_) {}
-        }
       } else {
-        audioRef.current.play().then(() => {
-          setIsPlaying(true);
-        }).catch(() => {});
-        if (showVideo && ytPlayerRef.current) {
-          try {
-            ytPlayerRef.current.mute();
-            ytPlayerRef.current.seekTo(audioRef.current.currentTime, true);
-            ytPlayerRef.current.playVideo();
-          } catch (_) {}
-        }
+        try {
+          ytPlayerRef.current.unMute();
+          ytPlayerRef.current.playVideo();
+        } catch (_) {}
+        setIsPlaying(true);
       }
     }
   };
 
   // Kéo thanh tiến trình tua bài hát mượt mà
   const handleSeek = (e) => {
-    if (!progressBarRef.current || !duration) return;
+    if (!progressBarRef.current || !duration || !ytPlayerRef.current) return;
     const rect = progressBarRef.current.getBoundingClientRect();
     const clientX = e.touches ? e.touches[0].clientX : e.clientX;
     const clickX = Math.max(0, Math.min(clientX - rect.left, rect.width));
     const ratio = clickX / rect.width;
     const targetTime = ratio * duration;
-    setCurrentTime(targetTime);
-    if (audioRef.current) {
-      audioRef.current.currentTime = targetTime;
-    }
-    if (showVideo && ytPlayerRef.current) {
-      try { ytPlayerRef.current.seekTo(targetTime, true); } catch (_) {}
-    }
+    try {
+      ytPlayerRef.current.seekTo(targetTime, true);
+      setCurrentTime(targetTime);
+    } catch (_) {}
   };
 
   // Đổi tốc độ phát
@@ -864,74 +891,13 @@ export default function App() {
               {playbackRate}x
             </button>
           </div>
-
-          {/* LUỒNG ÂM THANH PHẦN CỨNG APPLE LOSSLESS / AAC NGUYÊN BẢN (CHẠY NỀN LIÊN TỤC KHI TẮT MÀN HÌNH) */}
-          <audio
-            ref={audioRef}
-            playsInline
-            preload="auto"
-            onTimeUpdate={() => {
-              if (audioRef.current) {
-                const t = audioRef.current.currentTime;
-                if (t != null && !Number.isNaN(t)) setCurrentTime(t);
-              }
-            }}
-            onLoadedMetadata={() => {
-              if (audioRef.current) {
-                const d = audioRef.current.duration;
-                if (d && !Number.isNaN(d) && d > 0) setDuration(d);
-              }
-            }}
-            onPlaying={() => {
-              setIsPlaying(true);
-              setLoadingTrack(false);
-            }}
-            onWaiting={() => {
-              setLoadingTrack(true);
-            }}
-            onPause={() => {
-              setIsPlaying(false);
-            }}
-            onEnded={() => {
-              if (loopModeRef.current === 'one') {
-                if (audioRef.current) {
-                  audioRef.current.currentTime = 0;
-                  audioRef.current.play().catch(() => {});
-                }
-              } else {
-                nextSong();
-              }
-            }}
-            onError={(e) => {
-              console.warn('Audio stream error, fetching direct audio-info fallback:', e);
-              if (currentRef.current) {
-                const vid = currentRef.current.videoId || (currentRef.current.id?.startsWith('yt-') ? currentRef.current.id.replace('yt-', '') : currentRef.current.id);
-                if (vid) {
-                  fetch(`${API}/audio-info/${vid}`)
-                    .then((r) => r.json())
-                    .then((data) => {
-                      if (data && data.url && audioRef.current && audioRef.current.src !== data.url) {
-                        audioRef.current.src = data.url;
-                        audioRef.current.load();
-                        audioRef.current.play().then(() => {
-                          setIsPlaying(true);
-                          setLoadingTrack(false);
-                        }).catch(() => {});
-                      }
-                    })
-                    .catch(() => {});
-                }
-              }
-            }}
-            style={{ display: 'none' }}
-          />
         </section>
 
-        {/* HƯỚNG DẪN PHÁT NGẦM KHI THOÁT RA HOẶC TẮT MÀN HÌNH IPHONE */}
+        {/* HƯỚNG DẪN NGHE NHẠC KHI TẮT MÀN HÌNH / THOÁT RA NGOÀI */}
         <div style={styles.iosTipCard}>
           <span style={styles.iosTipIcon}>💡</span>
           <span style={styles.iosTipText}>
-            <strong>Phát nhạc khi thoát ứng dụng / Khóa máy:</strong> Nếu vừa vuốt về Home hoặc tắt màn hình mà nhạc tạm dừng, bạn chỉ cần <strong>nhấn nút ▶ (Phát) trên Màn hình khóa hoặc Trung tâm điều khiển (Control Center)</strong> là nhạc sẽ tiếp tục phát ngầm 100%!
+            <strong>Mẹo nghe tắt màn hình trên iPhone:</strong> Bấm nút <strong>Xem MV</strong> ở trên ➔ Chạm vào khung video chọn <strong>biểu tượng PiP (Cửa sổ nổi)</strong> hoặc Toàn màn hình ➔ Vuốt về Home hoặc Khóa máy là nhạc sẽ phát ngầm liên tục 100% không bao giờ dừng!
           </span>
         </div>
 
