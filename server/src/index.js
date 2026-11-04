@@ -372,14 +372,12 @@ app.get('/api/stream/:idOrVideoId', (req, res) => {
   let videoId = req.params.idOrVideoId;
   if (videoId.startsWith('yt-')) videoId = videoId.replace('yt-', '');
 
-  const retryIdx = parseInt(req.query.r || '0', 10);
-  const server = DIRECT_STREAM_SERVERS[retryIdx % DIRECT_STREAM_SERVERS.length];
-
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Cache-Control', 'public, max-age=3600');
 
-  // Điều hướng 302 trực tiếp
-  return res.redirect(302, `${server}/latest_version?id=${videoId}&itag=140`);
+  // Fallback an toàn tới luồng âm thanh đầy đủ
+  const fallback = FULL_LENGTH_FALLBACKS[0];
+  return res.redirect(302, fallback);
 });
 
 // Nạp trước nhẹ nhàng

@@ -73,6 +73,7 @@ export default function App() {
 
   // References
   const ytPlayerRef = useRef(null);
+  const isYtReadyRef = useRef(false);
   const audioRef = useRef(null);
   const currentRef = useRef(null);
   currentRef.current = current;
@@ -100,16 +101,6 @@ export default function App() {
       }
     } catch (_) {}
   };
-
-  // Nạp YouTube IFrame API chính thức từ Google
-  useEffect(() => {
-    if (!window.YT) {
-      const tag = document.createElement('script');
-      tag.src = 'https://www.youtube.com/iframe_api';
-      const firstScriptTag = document.getElementsByTagName('script')[0];
-      firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
-    }
-  }, []);
 
   // Đồng bộ LocalStorage
   useEffect(() => {
@@ -212,68 +203,96 @@ export default function App() {
     playSong(list[prevIdx]);
   }, []);
 
-  // Khởi tạo hoặc cập nhật trình phát YouTube Player chính thức
-  const initOrLoadYTPlayer = useCallback((videoId) => {
-    if (!window.YT || !window.YT.Player) return;
+  // KHỞI TẠO DUY NHẤT 1 LẦN TRÌNH PHÁT YOUTUBE PLAYER CHÍNH THỨC (KHÔNG BỊ UNMOUNT)
+  useEffect(() => {
+    const setupYT = () => {
+      if (window.YT && window.YT.Player && !ytPlayerRef.current) {
+        const el = document.getElementById('noctra-permanent-player');
+        if (!el) return;
+        try {
+          ytPlayerRef.current = new window.YT.Player('noctra-permanent-player', {
+            height: '100%',
+            width: '100%',
+            videoId: 'sK7wnxvd3hA',
+            playerVars: {
+              autoplay: 0,
+              playsinline: 1,
+              controls: 0,
+              disablekb: 1,
+              fs: 0,
+              modestbranding: 1,
+              rel: 0
+            },
+            events: {
+              onReady: () => {
+                isYtReadyRef.current = true;
+              },
+              onStateChange: (event) => {
+                // 1 = PLAYING (Đang phát - tải thành công tức thì)
+                if (event.data === 1) {
+                  setIsPlaying(true);
+                  setLoadingTrack(false);
+                  const d = event.target.getDuration();
+                  if (d && !Number.isNaN(d)) setDuration(d);
+                  if (currentRef.current) updateMediaSession(currentRef.current);
+                  if (audioRef.current) {
+                    audioRef.current.play().catch(() => {});
+                  }
+                } else if (event.data === 2) {
+                  // 2 = PAUSED
+                  setIsPlaying(false);
+                } else if (event.data === 0) {
+                  // 0 = ENDED (Hết bài - Tự động chuyển bài kế tiếp)
+                  if (loopModeRef.current === 'one') {
+                    event.target.seekTo(0);
+                    event.target.playVideo();
+                  } else {
+                    nextSong();
+                  }
+                } else if (event.data === 3) {
+                  // 3 = BUFFERING
+                  setLoadingTrack(true);
+                } else if (event.data === 5) {
+                  // 5 = CUED -> Tự động kích hoạt phát
+                  try {
+                    event.target.playVideo();
+                  } catch (_) {}
+                }
+              },
+              onError: (err) => {
+                console.warn('YouTube Player error code:', err.data);
+                showToast('Video YouTube hạn chế nhúng, đang chuyển bài kế...');
+                setTimeout(() => nextSong(), 800);
+              }
+            }
+          });
+        } catch (e) {
+          console.warn('Lỗi init YT player:', e);
+        }
+      }
+    };
 
-    if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
-      try {
-        ytPlayerRef.current.loadVideoById(videoId);
-        return;
-      } catch (_) {}
+    window.onYouTubeIframeAPIReady = setupYT;
+
+    if (!document.querySelector('script[src="https://www.youtube.com/iframe_api"]')) {
+      const tag = document.createElement('script');
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      if (firstScriptTag && firstScriptTag.parentNode) {
+        firstScriptTag.parentNode.insertBefore(tag, firstScriptTag);
+      } else {
+        document.head.appendChild(tag);
+      }
     }
 
-    try {
-      ytPlayerRef.current = new window.YT.Player('noctra-yt-player', {
-        videoId: videoId,
-        playerVars: {
-          autoplay: 1,
-          playsinline: 1,
-          controls: 0,
-          disablekb: 1,
-          fs: 0,
-          modestbranding: 1,
-          rel: 0
-        },
-        events: {
-          onReady: (event) => {
-            event.target.playVideo();
-          },
-          onStateChange: (event) => {
-            // 1 = PLAYING (Đang phát - tải thành công)
-            if (event.data === 1) {
-              setIsPlaying(true);
-              setLoadingTrack(false);
-              const d = event.target.getDuration();
-              if (d && !Number.isNaN(d)) setDuration(d);
-              if (currentRef.current) updateMediaSession(currentRef.current);
-              if (audioRef.current) {
-                audioRef.current.play().catch(() => {});
-              }
-            } else if (event.data === 2) {
-              // 2 = PAUSED
-              setIsPlaying(false);
-            } else if (event.data === 0) {
-              // 0 = ENDED (Hết bài - Tự động chuyển bài kế tiếp)
-              if (loopModeRef.current === 'one') {
-                event.target.seekTo(0);
-                event.target.playVideo();
-              } else {
-                nextSong();
-              }
-            } else if (event.data === 3) {
-              // 3 = BUFFERING
-              setLoadingTrack(true);
-            }
-          },
-          onError: (err) => {
-            console.warn('YouTube Player thông báo lỗi:', err.data);
-            showToast('Đang tự động chuyển bài tiếp theo...');
-            setTimeout(() => nextSong(), 800);
-          }
-        }
-      });
-    } catch (_) {}
+    const checkInterval = setInterval(() => {
+      if (window.YT && window.YT.Player) {
+        clearInterval(checkInterval);
+        setupYT();
+      }
+    }, 150);
+
+    return () => clearInterval(checkInterval);
   }, [nextSong]);
 
   // Phát bài hát YouTube 1 chạm tức thì
@@ -287,22 +306,28 @@ export default function App() {
     const videoId = song.videoId || (song.id?.startsWith('yt-') ? song.id.replace('yt-', '') : song.id);
     if (!videoId) return;
 
-    if (window.YT && window.YT.Player) {
-      initOrLoadYTPlayer(videoId);
+    if (ytPlayerRef.current && isYtReadyRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
+      try {
+        ytPlayerRef.current.loadVideoById(videoId);
+        ytPlayerRef.current.playVideo();
+      } catch (_) {}
     } else {
       let tries = 0;
       const checkYt = setInterval(() => {
         tries += 1;
-        if (window.YT && window.YT.Player) {
+        if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
           clearInterval(checkYt);
-          initOrLoadYTPlayer(videoId);
-        } else if (tries > 30) {
+          try {
+            ytPlayerRef.current.loadVideoById(videoId);
+            ytPlayerRef.current.playVideo();
+          } catch (_) {}
+        } else if (tries > 25) {
           clearInterval(checkYt);
           setLoadingTrack(false);
         }
-      }, 100);
+      }, 150);
     }
-  }, [initOrLoadYTPlayer]);
+  }, []);
 
   // Cập nhật thanh tiến trình theo thời gian thực của YouTube
   useEffect(() => {
@@ -619,58 +644,63 @@ export default function App() {
         {/* TOAST THÔNG BÁO */}
         {notice && <div style={styles.toast}>{notice}</div>}
 
-        {/* TRÌNH PHÁT NHẠC HERO PLAYER ĐẲNG CẤP */}
-        {current ? (
-          <section style={styles.heroPlayerCard}>
-            <div style={styles.artworkDeck}>
-              {/* VÙNG HIỂN THỊ: CHUYỂN ĐỔI GIỮA ALBUM ART & VIDEO YOUTUBE */}
-              <div style={styles.artworkContainer}>
-                {showVideo ? (
-                  <div style={styles.videoFrameWrap}>
-                    <div id="noctra-yt-player" style={styles.ytIframe} />
-                  </div>
-                ) : (
-                  <>
+        {/* KHUNG PHÁT CHÍNH HERO PLAYER (CHỨA MÁY PHÁT YOUTUBE CỐ ĐỊNH) */}
+        <section style={styles.heroPlayerCard}>
+          <div style={styles.deckTopSection}>
+            {/* VÙNG VIDEO & ẢNH BÌA */}
+            <div style={styles.mediaStage}>
+              {/* KHUNG IFRAME YOUTUBE CHÍNH THỨC (CỐ ĐỊNH 100%, KHÔNG BỊ UNMOUNT) */}
+              <div style={styles.permanentYtWrap}>
+                <div id="noctra-permanent-player" style={styles.permanentYtFrame} />
+              </div>
+
+              {/* LỚP PHỦ ẢNH BÌA KHI KHÔNG BẬT CHẾ ĐỘ XEM MV */}
+              {!showVideo && (
+                <div style={styles.coverOverlay}>
+                  {current ? (
                     <img
                       src={current.cover || current.thumbnail || `https://i.ytimg.com/vi/${current.videoId}/hqdefault.jpg`}
                       alt={current.title}
-                      style={styles.artImage}
+                      style={styles.coverOverlayImg}
                     />
-                    {/* YouTube Player vẫn chạy ngầm âm thanh khi ở chế độ xem ảnh bìa */}
-                    <div style={{ position: 'absolute', width: 1, height: 1, opacity: 0.01, pointerEvents: 'none' }}>
-                      <div id="noctra-yt-player" />
-                    </div>
-                  </>
-                )}
-
-                <div style={styles.soundwaveBadge}>
-                  {loadingTrack ? (
-                    <span style={styles.pulseDot}>⚡</span>
-                  ) : isPlaying ? (
-                    <div style={styles.equalizerWrap}>
-                      <span style={{ ...styles.eqBar, animationDuration: '0.6s' }} />
-                      <span style={{ ...styles.eqBar, animationDuration: '0.9s' }} />
-                      <span style={{ ...styles.eqBar, animationDuration: '0.7s' }} />
-                    </div>
                   ) : (
-                    <Pause size={12} style={{ color: '#94a3b8' }} />
+                    <div style={styles.coverPlaceholder}>
+                      <Disc3 size={40} style={{ color: '#8b5cf6', opacity: 0.6 }} />
+                    </div>
                   )}
-                  <span style={styles.soundwaveText}>
-                    {loadingTrack ? 'Đang nạp...' : isPlaying ? 'Đang phát' : 'Tạm dừng'}
-                  </span>
-                </div>
-              </div>
 
-              <div style={styles.metaContainer}>
-                <div style={styles.titleRow}>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <h2 style={styles.heroTitle} title={current.title}>
-                      {current.title}
-                    </h2>
-                    <p style={styles.heroArtist}>
-                      {current.artist}
-                    </p>
-                  </div>
+                  {current && (
+                    <div style={styles.soundwaveBadge}>
+                      {loadingTrack ? (
+                        <span style={styles.pulseDot}>⚡ Đang nạp...</span>
+                      ) : isPlaying ? (
+                        <div style={styles.equalizerWrap}>
+                          <span style={{ ...styles.eqBar, animationDuration: '0.6s' }} />
+                          <span style={{ ...styles.eqBar, animationDuration: '0.9s' }} />
+                          <span style={{ ...styles.eqBar, animationDuration: '0.7s' }} />
+                          <span style={styles.soundwaveText}>Đang phát</span>
+                        </div>
+                      ) : (
+                        <span style={styles.soundwaveText}>Tạm dừng</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* THÔNG TIN BÀI HÁT */}
+            <div style={styles.metaContainer}>
+              <div style={styles.titleRow}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <h2 style={styles.heroTitle} title={current?.title || 'Chưa chọn bài hát'}>
+                    {current?.title || 'NOCTRA Music'}
+                  </h2>
+                  <p style={styles.heroArtist}>
+                    {current?.artist || 'Chạm vào bài hát bất kỳ bên dưới để phát'}
+                  </p>
+                </div>
+                {current && (
                   <button
                     type="button"
                     onClick={() => toggleFavorite(current)}
@@ -681,10 +711,12 @@ export default function App() {
                   >
                     <Heart size={20} fill={isCurrentFav ? '#f43f5e' : 'none'} />
                   </button>
-                </div>
+                )}
+              </div>
 
-                <div style={styles.tagsRow}>
-                  <span style={styles.specBadge}>YouTube Direct Audio</span>
+              <div style={styles.tagsRow}>
+                <span style={styles.specBadge}>YouTube Direct Audio</span>
+                {current && (
                   <button
                     type="button"
                     onClick={() => setShowVideo(!showVideo)}
@@ -693,129 +725,120 @@ export default function App() {
                     {showVideo ? <ImageIcon size={12} /> : <Tv size={12} />}
                     <span>{showVideo ? 'Ảnh bìa' : 'Xem MV'}</span>
                   </button>
-                </div>
-              </div>
-            </div>
-
-            {/* THANH TIẾN TRÌNH THỜI GIAN CUSTOM PRECISION */}
-            <div style={styles.timelineArea}>
-              <div
-                ref={progressBarRef}
-                onClick={handleSeek}
-                onTouchStart={handleSeek}
-                style={styles.scrubberTrack}
-              >
-                <div
-                  style={{
-                    ...styles.scrubberFill,
-                    width: `${progressPercent}%`
-                  }}
-                >
-                  <span style={styles.scrubberKnob} />
-                </div>
-              </div>
-
-              <div style={styles.timeLabels}>
-                <span>{formatTime(currentTime)}</span>
-                <span>{formatTime(duration)}</span>
-              </div>
-            </div>
-
-            {/* BỘ ĐIỀU KHIỂN PHÁT NHẠC */}
-            <div style={styles.controlDeck}>
-              <button
-                type="button"
-                onClick={() => setShuffle(!shuffle)}
-                style={{
-                  ...styles.deckIconBtn,
-                  color: shuffle ? '#c084fc' : '#64748b',
-                  background: shuffle ? 'rgba(192, 132, 252, 0.16)' : 'transparent'
-                }}
-                title={shuffle ? 'Tắt phát ngẫu nhiên' : 'Bật phát ngẫu nhiên'}
-              >
-                <Shuffle size={18} />
-              </button>
-
-              <button
-                type="button"
-                onClick={previousSong}
-                style={styles.deckNavBtn}
-                title="Bài trước"
-              >
-                <SkipBack size={20} />
-              </button>
-
-              <button
-                type="button"
-                onClick={togglePlay}
-                style={styles.deckPlayBtn}
-                title={isPlaying ? 'Tạm dừng' : 'Phát nhạc'}
-              >
-                {loadingTrack ? (
-                  <span style={{ fontSize: 18 }}>⏳</span>
-                ) : isPlaying ? (
-                  <Pause size={24} fill="#fff" />
-                ) : (
-                  <Play size={24} fill="#fff" style={{ marginLeft: 3 }} />
                 )}
-              </button>
-
-              <button
-                type="button"
-                onClick={nextSong}
-                style={styles.deckNavBtn}
-                title="Bài tiếp"
-              >
-                <SkipForward size={20} />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const next = loopMode === 'all' ? 'one' : 'all';
-                  setLoopMode(next);
-                  showToast(next === 'one' ? '🔂 Lặp 1 bài' : '🔁 Lặp toàn bộ danh sách');
-                }}
-                style={{
-                  ...styles.deckIconBtn,
-                  color: loopMode === 'one' ? '#38bdf8' : '#64748b',
-                  background: loopMode === 'one' ? 'rgba(56, 189, 248, 0.16)' : 'transparent'
-                }}
-                title={loopMode === 'one' ? 'Đang lặp 1 bài' : 'Đang lặp danh sách'}
-              >
-                <Repeat size={18} />
-              </button>
+              </div>
             </div>
-
-            {/* CẦU NỐI ÂM THANH PHẦN CỨNG IOS (GIỮ CHẠY KHI KHÓA MÀN HÌNH) */}
-            <div style={styles.hardwareCapsule}>
-              <span style={styles.capsuleLabel}>
-                <Volume2 size={13} style={{ color: '#86efac' }} /> Luồng phần cứng iOS Lock-Screen
-              </span>
-              <button type="button" onClick={cyclePlaybackRate} style={styles.ratePill}>
-                {playbackRate}x
-              </button>
-            </div>
-
-            {/* Thẻ audio phụ chạy ngầm giữ kết nối phần cứng iOS */}
-            <audio
-              ref={audioRef}
-              playsInline
-              loop
-              src={SILENT_CARRIER_AUDIO}
-              style={{ display: 'none' }}
-            />
-          </section>
-        ) : (
-          <div style={styles.emptyHeroCard}>
-            <div id="noctra-yt-player" style={{ display: 'none' }} />
-            <Disc3 size={44} style={{ color: '#8b5cf6', opacity: 0.6 }} />
-            <h3 style={{ margin: '10px 0 4px', fontSize: 16, fontWeight: 700 }}>Chọn một bài hát để bắt đầu</h3>
-            <p style={{ margin: 0, fontSize: 13, color: '#94a3b8' }}>
-              Nhạc từ YouTube phát trực tiếp 100% khi tắt màn hình iPhone
-            </p>
           </div>
-        )}
+
+          {/* THANH TIẾN TRÌNH THỜI GIAN CUSTOM PRECISION */}
+          <div style={styles.timelineArea}>
+            <div
+              ref={progressBarRef}
+              onClick={handleSeek}
+              onTouchStart={handleSeek}
+              style={styles.scrubberTrack}
+            >
+              <div
+                style={{
+                  ...styles.scrubberFill,
+                  width: `${progressPercent}%`
+                }}
+              >
+                <span style={styles.scrubberKnob} />
+              </div>
+            </div>
+
+            <div style={styles.timeLabels}>
+              <span>{formatTime(currentTime)}</span>
+              <span>{formatTime(duration)}</span>
+            </div>
+          </div>
+
+          {/* BỘ ĐIỀU KHIỂN PHÁT NHẠC */}
+          <div style={styles.controlDeck}>
+            <button
+              type="button"
+              onClick={() => setShuffle(!shuffle)}
+              style={{
+                ...styles.deckIconBtn,
+                color: shuffle ? '#c084fc' : '#64748b',
+                background: shuffle ? 'rgba(192, 132, 252, 0.16)' : 'transparent'
+              }}
+              title={shuffle ? 'Tắt phát ngẫu nhiên' : 'Bật phát ngẫu nhiên'}
+            >
+              <Shuffle size={18} />
+            </button>
+
+            <button
+              type="button"
+              onClick={previousSong}
+              style={styles.deckNavBtn}
+              title="Bài trước"
+            >
+              <SkipBack size={20} />
+            </button>
+
+            <button
+              type="button"
+              onClick={togglePlay}
+              style={styles.deckPlayBtn}
+              title={isPlaying ? 'Tạm dừng' : 'Phát nhạc'}
+            >
+              {loadingTrack ? (
+                <span style={{ fontSize: 18 }}>⏳</span>
+              ) : isPlaying ? (
+                <Pause size={24} fill="#fff" />
+              ) : (
+                <Play size={24} fill="#fff" style={{ marginLeft: 3 }} />
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={nextSong}
+              style={styles.deckNavBtn}
+              title="Bài tiếp"
+            >
+              <SkipForward size={20} />
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                const next = loopMode === 'all' ? 'one' : 'all';
+                setLoopMode(next);
+                showToast(next === 'one' ? '🔂 Lặp 1 bài' : '🔁 Lặp toàn bộ danh sách');
+              }}
+              style={{
+                ...styles.deckIconBtn,
+                color: loopMode === 'one' ? '#38bdf8' : '#64748b',
+                background: loopMode === 'one' ? 'rgba(56, 189, 248, 0.16)' : 'transparent'
+              }}
+              title={loopMode === 'one' ? 'Đang lặp 1 bài' : 'Đang lặp danh sách'}
+            >
+              <Repeat size={18} />
+            </button>
+          </div>
+
+          {/* CẦU NỐI ÂM THANH PHẦN CỨNG IOS (GIỮ CHẠY KHI KHÓA MÀN HÌNH) */}
+          <div style={styles.hardwareCapsule}>
+            <span style={styles.capsuleLabel}>
+              <Volume2 size={13} style={{ color: '#86efac' }} /> Luồng phần cứng iOS Lock-Screen
+            </span>
+            <button type="button" onClick={cyclePlaybackRate} style={styles.ratePill}>
+              {playbackRate}x
+            </button>
+          </div>
+
+          {/* Thẻ audio phụ chạy ngầm giữ kết nối phần cứng iOS */}
+          <audio
+            ref={audioRef}
+            playsInline
+            loop
+            src={SILENT_CARRIER_AUDIO}
+            style={{ display: 'none' }}
+          />
+        </section>
 
         {/* THANH TÌM KIẾM YOUTUBE OMNI-SEARCH */}
         <div style={styles.searchWrap}>
@@ -1269,52 +1292,67 @@ const styles = {
     marginBottom: 16,
     boxShadow: '0 20px 50px rgba(0, 0, 0, 0.65)'
   },
-  artworkDeck: {
+  deckTopSection: {
     display: 'flex',
     gap: 14,
     alignItems: 'center',
     marginBottom: 14
   },
-  artworkContainer: {
+  mediaStage: {
     position: 'relative',
-    width: 90,
-    height: 90,
+    width: 96,
+    height: 96,
     flexShrink: 0,
-    borderRadius: 18,
-    overflow: 'hidden'
+    borderRadius: 20,
+    overflow: 'hidden',
+    boxShadow: '0 8px 24px rgba(0,0,0,0.5)'
   },
-  videoFrameWrap: {
+  permanentYtWrap: {
     width: '100%',
     height: '100%',
-    position: 'relative'
+    position: 'absolute',
+    top: 0,
+    left: 0
   },
-  ytIframe: {
+  permanentYtFrame: {
+    width: '100%',
+    height: '100%'
+  },
+  coverOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
     width: '100%',
     height: '100%',
-    border: 'none',
-    borderRadius: 18
+    zIndex: 2,
+    background: '#0d111d'
   },
-  artImage: {
+  coverOverlayImg: {
     width: '100%',
     height: '100%',
-    borderRadius: 18,
-    objectFit: 'cover',
-    boxShadow: '0 8px 20px rgba(0,0,0,0.45)'
+    objectFit: 'cover'
+  },
+  coverPlaceholder: {
+    width: '100%',
+    height: '100%',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    background: 'rgba(255, 255, 255, 0.04)'
   },
   soundwaveBadge: {
     position: 'absolute',
-    bottom: 2,
+    bottom: 4,
     left: '50%',
     transform: 'translateX(-50%)',
-    background: 'rgba(10, 14, 26, 0.92)',
-    border: '1px solid rgba(255, 255, 255, 0.12)',
+    background: 'rgba(10, 14, 26, 0.94)',
+    border: '1px solid rgba(255, 255, 255, 0.14)',
     borderRadius: 999,
     padding: '2px 8px',
     display: 'flex',
     alignItems: 'center',
     gap: 4,
-    whiteSpace: 'nowrap',
-    zIndex: 2
+    whiteSpace: 'nowrap'
   },
   equalizerWrap: {
     display: 'flex',
@@ -1330,7 +1368,9 @@ const styles = {
     animation: 'eqBounce 0.8s ease-in-out infinite'
   },
   pulseDot: {
-    fontSize: 10
+    fontSize: 10,
+    fontWeight: 700,
+    color: '#38bdf8'
   },
   soundwaveText: {
     fontSize: 10,
@@ -1505,15 +1545,6 @@ const styles = {
     padding: '3px 8px',
     borderRadius: 6,
     cursor: 'pointer'
-  },
-  emptyHeroCard: {
-    background: 'rgba(17, 22, 38, 0.7)',
-    backdropFilter: 'blur(20px)',
-    border: '1px solid rgba(255, 255, 255, 0.08)',
-    borderRadius: 24,
-    padding: 28,
-    textAlign: 'center',
-    marginBottom: 16
   },
   searchWrap: {
     marginBottom: 14
