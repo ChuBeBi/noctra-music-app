@@ -1,9 +1,9 @@
 {
-  "name": "NOCTRA Music iOS",
+  "name": "NOCTRA YouTube Music",
   "short_name": "NOCTRA",
-  "description": "Trình phát nhạc nền khi tắt màn hình iPhone",
+  "description": "Nghe nhạc YouTube tắt màn hình trên iPhone",
   "start_url": "/",
   "display": "browser",
-  "background_color": "#07080d",
-  "theme_color": "#07080d"
+  "background_color": "#050508",
+  "theme_color": "#050508"
 }

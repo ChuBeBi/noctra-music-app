@@ -1,9 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-/**
- * Kết nối thẳng tới cổng 5000 của Express Server khi chạy dev trên mạng Wi-Fi (bỏ qua Vite proxy)
- * để iOS AVPlayer giữ kết nối HTTP 206 Partial Content không bị ngắt khi khóa màn hình.
- */
 function resolveApiBase() {
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL.replace(/\/$/, '');
@@ -20,14 +16,72 @@ function resolveApiBase() {
 const API_BASE = resolveApiBase();
 
 const MOOD_FILTERS = [
-  { id: 'all', label: '✨ Tự động theo Gu' },
-  { id: 'vpop', label: '🇻🇳 V-Pop Chill' },
-  { id: 'lofi', label: '☕ Lofi & Học tập' },
-  { id: 'indie', label: '🎸 Indie & Acoustic' },
-  { id: 'rnb', label: '🎧 R&B / Hip-Hop' },
-  { id: 'piano', label: '🎹 Piano thư giãn' },
+  { id: 'all', label: '✨ Chuẩn Gu Của Bạn' },
+  { id: 'vpop', label: '🇻🇳 V-Pop Thịnh Hành' },
+  { id: 'lofi', label: '☕ Lofi Chill' },
+  { id: 'indie', label: '🎸 Indie Việt' },
+  { id: 'rnb', label: '🔥 Rap & R&B' },
+  { id: 'remix', label: '⚡ Remix Sôi Động' },
+  { id: 'piano', label: '🎹 Piano & Mưa' },
   { id: 'usuk', label: '🌍 US-UK Hits' }
 ];
+
+// Hệ thống Vector SVG Icons sắc nét chuẩn iOS 18
+const Icons = {
+  Play: () => (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M8 5.14v14l11-7-11-7z" />
+    </svg>
+  ),
+  Pause: () => (
+    <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" />
+    </svg>
+  ),
+  Prev: () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 6h2v12H6zm3.5 6 8.5 6V6z" />
+    </svg>
+  ),
+  Next: () => (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M6 18l8.5-6L6 6v12zM16 6v12h2V6h-2z" />
+    </svg>
+  ),
+  Shuffle: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="16 3 21 3 21 8" />
+      <line x1="4" y1="20" x2="21" y2="3" />
+      <polyline points="21 16 21 21 16 21" />
+      <line x1="15" y1="15" x2="21" y2="21" />
+      <line x1="4" y1="4" x2="9" y2="9" />
+    </svg>
+  ),
+  Repeat: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="17 1 21 5 17 9" />
+      <path d="M3 11V9a4 4 0 0 1 4-4h14" />
+      <polyline points="7 23 3 19 7 15" />
+      <path d="M21 13v2a4 4 0 0 1-4 4H3" />
+    </svg>
+  ),
+  Heart: ({ filled }) => (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill={filled ? '#f43f5e' : 'none'} stroke={filled ? '#f43f5e' : 'currentColor'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z" />
+    </svg>
+  ),
+  Search: () => (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  ),
+  YouTube: () => (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="#ef4444">
+      <path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z" />
+    </svg>
+  )
+};
 
 export default function App() {
   const [songs, setSongs] = useState([]);
@@ -36,36 +90,41 @@ export default function App() {
   const [loadingTrack, setLoadingTrack] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
 
-  const [activeTab, setActiveTab] = useState('library');
-  const [loopMode, setLoopMode] = useState('all'); // 'all' | 'radio' | 'one'
+  const [activeTab, setActiveTab] = useState('library'); // 'library' | 'discover'
+  const [loopMode, setLoopMode] = useState('radio'); // 'radio' (tự phát tiếp nhạc hợp gu) | 'all' | 'one'
   const [shuffle, setShuffle] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [sleepMinutesLeft, setSleepMinutesLeft] = useState(0);
 
-  // Tìm kiếm & Đề xuất
+  // Tìm kiếm & Đề xuất YouTube
   const [omniQuery, setOmniQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedMood, setSelectedMood] = useState('all');
   const [recommendations, setRecommendations] = useState([]);
-  const [topTags, setTopTags] = useState(['lofi', 'chill']);
+  const [topTags, setTopTags] = useState(['vpop', 'lofi']);
   const [loadingRecs, setLoadingRecs] = useState(false);
 
-  // Phát hiện nếu người dùng đang mở từ icon WebClip cũ ngoài màn hình chính
   const isStandaloneWebClip =
     typeof window !== 'undefined' && Boolean(window.navigator?.standalone);
 
-  // Refs giữ trạng thái đồng bộ để gọi ngay lập tức trong sự kiện phần cứng iOS (không phụ thuộc React render)
+  // Refs đồng bộ cho phần cứng iOS & DOM Refs cho thanh trượt 60fps (0% React Re-render)
   const audioRef = useRef(null);
+  const progressInputRef = useRef(null);
+  const progressFillRef = useRef(null);
+  const curTimeTextRef = useRef(null);
+  const durTimeTextRef = useRef(null);
+
   const songsRef = useRef([]);
   const currentIndexRef = useRef(0);
-  const loopModeRef = useRef('all');
+  const loopModeRef = useRef('radio');
   const shuffleRef = useRef(false);
   const recommendationsRef = useRef([]);
   const prefetchedSetRef = useRef(new Set());
   const trackPlayedHalfRef = useRef(false);
+  const trackPrefetchedNextRef = useRef(false);
   const lastPositionUpdateRef = useRef(0);
-  const timeLabelRef = useRef(null);
+  const isSeekingRef = useRef(false);
 
   songsRef.current = songs;
   currentIndexRef.current = currentIndex;
@@ -82,10 +141,21 @@ export default function App() {
     }, 3000);
   };
 
-  // Đường dẫn có đuôi .m4a để iOS AVURLAsset nhận diện luồng phần cứng mediaserverd ngay lập tức
+  const formatTime = (sec) => {
+    if (!sec || Number.isNaN(sec) || !Number.isFinite(sec)) return '0:00';
+    const total = Math.floor(sec);
+    const hrs = Math.floor(total / 3600);
+    const mins = Math.floor((total % 3600) / 60);
+    const secs = total % 60;
+    if (hrs > 0) {
+      return `${hrs}:${mins < 10 ? '0' : ''}${mins}:${secs < 10 ? '0' : ''}${secs}`;
+    }
+    return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+  };
+
   const getPlayableUrl = (song) => {
     if (!song) return '';
-    const key = encodeURIComponent(song.id || song.youtubeId || 'default');
+    const key = encodeURIComponent(song.youtubeId || song.id);
     return `${API_BASE}/stream/${key}.m4a`;
   };
 
@@ -101,14 +171,14 @@ export default function App() {
     if (!('mediaSession' in navigator) || !song) return;
     try {
       navigator.mediaSession.metadata = new MediaMetadata({
-        title: song.title || 'NOCTRA Music',
-        artist: song.artist || 'NOCTRA',
-        album: 'NOCTRA iOS Lock Screen',
+        title: song.title || 'NOCTRA YouTube Music',
+        artist: song.artist || 'YouTube Audio',
+        album: 'NOCTRA YouTube Stream',
         artwork: [
           {
             src:
               song.thumbnail ||
-              'https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=512&q=80',
+              `https://i.ytimg.com/vi/${song.youtubeId || 'lTRiuFIWV54'}/hqdefault.jpg`,
             sizes: '512x512',
             type: 'image/jpeg'
           }
@@ -118,15 +188,15 @@ export default function App() {
   };
 
   const prefetchSong = (song) => {
-    if (!song?.id || prefetchedSetRef.current.has(song.id)) return;
-    prefetchedSetRef.current.add(song.id);
-    fetch(`${API_BASE}/prefetch/${encodeURIComponent(song.id)}.m4a`).catch(() => {});
+    const key = song?.youtubeId || song?.id;
+    if (!key || prefetchedSetRef.current.has(key)) return;
+    prefetchedSetRef.current.add(key);
+    fetch(`${API_BASE}/prefetch/${encodeURIComponent(key)}.m4a`).catch(() => {});
   };
 
   /**
-   * HÀM PHÁT ĐỒNG BỘ 100% (SYNCHRONOUS IMPERATIVE PLAYBACK):
-   * Được gọi trực tiếp trong cùng 1 xung nhịp (call stack) của sự kiện onClick / onEnded / mediaSession.
-   * Đây là điều kiện bắt buộc của iOS Safari để không bị mất quyền phát nền khi tắt màn hình hoặc thoát app!
+   * PHÁT ĐỒNG BỘ 100% NGAY TRONG SỰ KIỆN (SYNCHRONOUS IMPERATIVE PLAYBACK):
+   * Giữ nguyên quyền phát nền phần cứng của iOS khi tắt màn hình hoặc vuốt thoát Safari.
    */
   const playSongImperatively = (targetSong, targetIdx, autoPlay = true) => {
     const audio = audioRef.current;
@@ -134,6 +204,7 @@ export default function App() {
 
     activateIosPlaybackSession();
     trackPlayedHalfRef.current = false;
+    trackPrefetchedNextRef.current = false;
 
     const url = getPlayableUrl(targetSong);
     if (audio.src !== url) {
@@ -146,7 +217,14 @@ export default function App() {
     setCurrentIndex(targetIdx);
     updateMediaSessionMetadata(targetSong);
 
-    // Nạp sẵn bài kế tiếp vào RAM của Server
+    // Reset thanh thời gian trên DOM
+    if (progressInputRef.current) progressInputRef.current.value = 0;
+    if (progressFillRef.current) progressFillRef.current.style.width = '0%';
+    if (curTimeTextRef.current) curTimeTextRef.current.textContent = '0:00';
+    if (durTimeTextRef.current) {
+      durTimeTextRef.current.textContent = targetSong.durationText || '0:00';
+    }
+
     const list = songsRef.current;
     if (list.length > 1) {
       const nextSong = list[(targetIdx + 1) % list.length];
@@ -172,7 +250,6 @@ export default function App() {
     }
   };
 
-  // Khởi tải danh sách bài hát và gắn src cho bài đầu tiên (chưa tự phát để chờ chạm tay của người dùng)
   useEffect(() => {
     activateIosPlaybackSession();
     fetch(`${API_BASE}/songs`)
@@ -185,11 +262,12 @@ export default function App() {
             audioRef.current.src = getPlayableUrl(data[0]);
             updateMediaSessionMetadata(data[0]);
           }
+          if (data[0]) prefetchSong(data[0]);
           if (data[1]) prefetchSong(data[1]);
         }
       })
       .catch(() => {
-        showToast('Không kết nối được Server cổng 5000. Hãy kiểm tra cửa sổ chạy npm run dev.');
+        showToast('Đang kết nối tới NOCTRA YouTube Server...');
       });
 
     fetchRecommendations('all');
@@ -204,6 +282,7 @@ export default function App() {
         if (data?.items) {
           setRecommendations(data.items);
           recommendationsRef.current = data.items;
+          if (data.items[0]) prefetchSong(data.items[0]);
         }
         if (data?.topTags) setTopTags(data.topTags);
       })
@@ -230,7 +309,6 @@ export default function App() {
       .catch(() => {});
   };
 
-  // Chuyển bài đồng bộ ngay lập tức (kể cả khi màn hình iPhone đang tắt)
   const triggerNextTrackSync = (isEndedEvent = false) => {
     const list = songsRef.current;
     const idx = currentIndexRef.current;
@@ -243,14 +321,44 @@ export default function App() {
       return;
     }
 
+    // Nếu đang ở cuối danh sách và bật Auto-Radio -> tự động nạp bài đề xuất YouTube hợp gu vào danh sách và phát luôn!
+    if (
+      idx === list.length - 1 &&
+      loopModeRef.current === 'radio' &&
+      recommendationsRef.current.length > 0
+    ) {
+      const nextRec = recommendationsRef.current[0];
+      const remainingRecs = recommendationsRef.current.slice(1);
+      recommendationsRef.current = remainingRecs;
+      setRecommendations(remainingRecs);
+
+      const newSongObj = {
+        ...nextRec,
+        id: `yt-${nextRec.youtubeId}`,
+        liked: false,
+        playCount: 1
+      };
+      const updatedList = [...list, newSongObj];
+      songsRef.current = updatedList;
+      setSongs(updatedList);
+      playSongImperatively(newSongObj, updatedList.length - 1, true);
+
+      // Đồng bộ ngầm lên server
+      fetch(`${API_BASE}/songs`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(newSongObj)
+      }).catch(() => {});
+      return;
+    }
+
     let nextIdx = (idx + 1) % list.length;
     if (shuffleRef.current && list.length > 1) {
       nextIdx = Math.floor(Math.random() * list.length);
       if (nextIdx === idx) nextIdx = (idx + 1) % list.length;
     }
 
-    const nextSong = list[nextIdx];
-    playSongImperatively(nextSong, nextIdx, true);
+    playSongImperatively(list[nextIdx], nextIdx, true);
   };
 
   const triggerPrevTrackSync = () => {
@@ -266,8 +374,7 @@ export default function App() {
     }
 
     const prevIdx = (idx - 1 + list.length) % list.length;
-    const prevSong = list[prevIdx];
-    playSongImperatively(prevSong, prevIdx, true);
+    playSongImperatively(list[prevIdx], prevIdx, true);
   };
 
   const playCurrentSync = () => {
@@ -280,15 +387,19 @@ export default function App() {
     if (!audio.src) {
       audio.src = getPlayableUrl(song);
     }
+    setLoadingTrack(true);
     audio
       .play()
       .then(() => {
         setIsPlaying(true);
+        setLoadingTrack(false);
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'playing';
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        setLoadingTrack(false);
+      });
   };
 
   const pauseCurrentSync = () => {
@@ -301,7 +412,6 @@ export default function App() {
     }
   };
 
-  // Đăng ký nút điều khiển ngoài Màn hình khóa iPhone & Control Center (1 lần duy nhất, dùng Ref đồng bộ)
   useEffect(() => {
     if (!('mediaSession' in navigator)) return;
 
@@ -349,25 +459,34 @@ export default function App() {
   }, []);
 
   /**
-   * CẬP NHẬT THỜI GIAN SIÊU NHẸ (0% REACT RE-RENDER KHI TẮT MÀN HÌNH HOẶC THOÁT APP):
-   * Không gọi setState liên tục làm iOS đóng băng tiến trình ngầm!
+   * CẬP NHẬT THANH TRƯỢT & THỜI GIAN BẰNG DOM REF TRỰC TIẾP (60FPS, 0% REACT RE-RENDER):
+   * Khi màn hình iPhone tắt (document.hidden === true), hoàn toàn không tốn CPU render giao diện,
+   * đồng thời tự động nạp trước bài kế tiếp khi phát tới 80% thời lượng!
    */
   const handleTimeUpdate = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
     const cur = audio.currentTime || 0;
-    const dur = audio.duration && !Number.isNaN(audio.duration) ? audio.duration : 0;
+    const dur = audio.duration && Number.isFinite(audio.duration) ? audio.duration : 0;
 
-    // Cập nhật chữ hiển thị thời gian trực tiếp qua DOM ref (không gây re-render React!)
-    if (!document.hidden && timeLabelRef.current) {
-      const format = (sec) => {
-        if (!sec || Number.isNaN(sec)) return '0:00';
-        const m = Math.floor(sec / 60);
-        const s = Math.floor(sec % 60);
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
-      };
-      timeLabelRef.current.textContent = `${format(cur)} / ${format(dur)}`;
+    if (!document.hidden && !isSeekingRef.current) {
+      if (curTimeTextRef.current) {
+        curTimeTextRef.current.textContent = formatTime(cur);
+      }
+      if (dur > 0) {
+        if (durTimeTextRef.current) {
+          durTimeTextRef.current.textContent = formatTime(dur);
+        }
+        if (progressInputRef.current) {
+          progressInputRef.current.max = dur;
+          progressInputRef.current.value = cur;
+        }
+        if (progressFillRef.current) {
+          const pct = Math.min(100, Math.max(0, (cur / dur) * 100));
+          progressFillRef.current.style.width = `${pct}%`;
+        }
+      }
     }
 
     if (dur > 0) {
@@ -377,7 +496,19 @@ export default function App() {
         sendTasteSignal(activeSong.id, 'complete');
       }
 
-      // Chỉ cập nhật thanh thời gian trên màn hình khóa iPhone mỗi 4 giây/lần để tiết kiệm tối đa tài nguyên ngầm
+      // Khi phát được 80% bài, nạp sẵn bài tiếp theo vào RAM để chuyển bài lúc tắt màn hình đạt 0ms
+      if (!trackPrefetchedNextRef.current && cur / dur > 0.8) {
+        trackPrefetchedNextRef.current = true;
+        const list = songsRef.current;
+        if (list.length > 1) {
+          const nextSong = list[(currentIndexRef.current + 1) % list.length];
+          prefetchSong(nextSong);
+        }
+        if (recommendationsRef.current[0]) {
+          prefetchSong(recommendationsRef.current[0]);
+        }
+      }
+
       const now = Date.now();
       if (
         now - lastPositionUpdateRef.current > 4000 &&
@@ -396,7 +527,6 @@ export default function App() {
     }
   };
 
-  // Hẹn giờ tắt nhạc khi ngủ
   useEffect(() => {
     if (sleepMinutesLeft <= 0) return;
     const timer = setInterval(() => {
@@ -412,7 +542,7 @@ export default function App() {
     return () => clearInterval(timer);
   }, [sleepMinutesLeft]);
 
-  // Tìm kiếm tức thì
+  // Tìm kiếm trực tiếp trên YouTube khi gõ
   useEffect(() => {
     const trimmed = omniQuery.trim();
     if (!trimmed || /^https?:\/\//i.test(trimmed) || /^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
@@ -428,48 +558,46 @@ export default function App() {
         })
         .catch(() => {})
         .finally(() => setIsSearching(false));
-    }, 300);
+    }, 320);
 
     return () => clearTimeout(timer);
   }, [omniQuery]);
 
-  // Phát ngay khi chạm vào bài tìm kiếm hoặc bài đề xuất (Mở khóa âm thanh đồng bộ ngay lúc chạm!)
-  const handleQuickPlayTrack = async (track) => {
+  // Khi người dùng chạm vào 1 bài từ Kết quả Tìm kiếm YouTube hoặc Đề xuất YouTube -> Phát đồng bộ ngay lập tức!
+  const handleQuickPlayYouTubeTrack = (track) => {
     activateIosPlaybackSession();
-    const audio = audioRef.current;
-    // Mở khóa quyền phát trên thẻ <audio> ngay trong nhịp chạm tay trước khi gọi fetch
-    if (audio) {
-      audio.play().catch(() => {});
-    }
 
-    try {
-      setLoadingTrack(true);
-      const res = await fetch(`${API_BASE}/songs`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          urlOrId: track.youtubeId || track.audioUrl,
-          youtubeId: track.youtubeId || null,
-          audioUrl: track.audioUrl || null,
-          title: track.title,
-          artist: track.artist,
-          thumbnail: track.thumbnail,
-          tags: track.tags
-        })
-      });
-      const added = await res.json();
-      if (!res.ok) throw new Error(added.error || 'Lỗi thêm bài');
+    const newSongObj = {
+      id: `yt-${track.youtubeId}`,
+      youtubeId: track.youtubeId,
+      title: track.title,
+      artist: track.artist,
+      durationText: track.durationText || '',
+      thumbnail: track.thumbnail || `https://i.ytimg.com/vi/${track.youtubeId}/hqdefault.jpg`,
+      tags: track.tags || ['chill'],
+      liked: false,
+      playCount: 1
+    };
 
-      const newList = [added, ...songsRef.current.filter((s) => s.id !== added.id)];
-      songsRef.current = newList;
-      setSongs(newList);
-      playSongImperatively(added, 0, true);
-      showToast(`Đang phát: ${added.title}`);
-      fetchRecommendations(selectedMood);
-    } catch (err) {
-      showToast(err.message || 'Không thể phát bài này');
-      setLoadingTrack(false);
-    }
+    const newList = [
+      newSongObj,
+      ...songsRef.current.filter((s) => s.youtubeId !== track.youtubeId)
+    ];
+    songsRef.current = newList;
+    setSongs(newList);
+
+    // Gọi phát đồng bộ ngay trong cùng xung nhịp chạm tay để iOS cấp quyền khóa màn hình 100%!
+    playSongImperatively(newSongObj, 0, true);
+    showToast(`Đang phát từ YouTube: ${newSongObj.title}`);
+
+    // Lưu ngầm vào thư viện trên Server
+    fetch(`${API_BASE}/songs`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newSongObj)
+    })
+      .then(() => fetchRecommendations(selectedMood))
+      .catch(() => {});
   };
 
   const handleOmniSubmit = async (e) => {
@@ -477,9 +605,11 @@ export default function App() {
     const raw = omniQuery.trim();
     if (!raw) return;
     activateIosPlaybackSession();
+
     if (audioRef.current) {
       audioRef.current.play().catch(() => {});
     }
+
     setLoadingTrack(true);
     try {
       const res = await fetch(`${API_BASE}/songs`, {
@@ -488,7 +618,7 @@ export default function App() {
         body: JSON.stringify({ urlOrId: raw })
       });
       const added = await res.json();
-      if (!res.ok) throw new Error(added.error || 'Không tìm thấy bài hát');
+      if (!res.ok) throw new Error(added.error || 'Không tìm thấy video YouTube');
 
       const newList = [added, ...songsRef.current.filter((s) => s.id !== added.id)];
       songsRef.current = newList;
@@ -496,7 +626,7 @@ export default function App() {
       playSongImperatively(added, 0, true);
       setOmniQuery('');
       setSearchResults([]);
-      showToast(`Đã thêm & phát: ${added.title}`);
+      showToast(`Đã phát từ YouTube: ${added.title}`);
       fetchRecommendations(selectedMood);
     } catch (err) {
       showToast(err.message);
@@ -509,10 +639,10 @@ export default function App() {
       const text = await navigator.clipboard.readText();
       if (text && text.trim()) {
         setOmniQuery(text.trim());
-        showToast('Đã dán từ bộ nhớ tạm 📋');
+        showToast('Đã dán link YouTube từ bộ nhớ tạm 📋');
       }
     } catch (_) {
-      showToast('Hãy chạm giữ vào ô tìm kiếm để dán');
+      showToast('Hãy chạm giữ vào ô tìm kiếm để dán link YouTube');
     }
   };
 
@@ -534,222 +664,109 @@ export default function App() {
 
   return (
     <div style={styles.page}>
+      {/*
+        Thẻ <audio> phần cứng kích thước 1x1px (không dùng display:none để iOS giữ quyền phát nền,
+        và hoàn toàn ẩn khỏi mắt người dùng để giao diện sang trọng 100%).
+      */}
+      <audio
+        ref={audioRef}
+        playsInline
+        preload="auto"
+        onTimeUpdate={handleTimeUpdate}
+        onLoadedMetadata={handleTimeUpdate}
+        onEnded={() => triggerNextTrackSync(true)}
+        onPlay={() => {
+          activateIosPlaybackSession();
+          setIsPlaying(true);
+          setLoadingTrack(false);
+          if (songsRef.current[currentIndexRef.current]) {
+            updateMediaSessionMetadata(songsRef.current[currentIndexRef.current]);
+          }
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'playing';
+          }
+        }}
+        onPause={() => {
+          setIsPlaying(false);
+          if ('mediaSession' in navigator) {
+            navigator.mediaSession.playbackState = 'paused';
+          }
+        }}
+        onWaiting={() => setLoadingTrack(true)}
+        onPlaying={() => setLoadingTrack(false)}
+        onError={() => {
+          setLoadingTrack(false);
+          if (songsRef.current.length > 1) {
+            setTimeout(() => triggerNextTrackSync(true), 600);
+          }
+        }}
+        style={styles.hiddenHardwareAudio}
+      />
+
+      {/* Ánh sáng Aura chuyển màu động theo ảnh bìa YouTube */}
       {currentSong?.thumbnail && (
-        <div
-          style={{
-            ...styles.ambientGlow,
-            backgroundImage: `url(${currentSong.thumbnail})`
-          }}
-        />
+        <>
+          <div
+            style={{
+              ...styles.ambientOrbTop,
+              backgroundImage: `url(${currentSong.thumbnail})`
+            }}
+          />
+          <div
+            style={{
+              ...styles.ambientOrbBottom,
+              backgroundImage: `url(${currentSong.thumbnail})`
+            }}
+          />
+        </>
       )}
 
       <div style={styles.container}>
         {isStandaloneWebClip && (
-          <div style={styles.safariWarning}>
-            ⚠️ <strong>Lưu ý quan trọng trên iPhone:</strong> Bạn đang mở từ biểu tượng Màn hình chính cũ (chế độ WebClip của iOS sẽ tự ngắt mạng khi vuốt thoát ra). Hãy mở địa chỉ này trực tiếp trong ứng dụng <strong>Safari</strong> để thoát ra ngoài và tắt màn hình vẫn phát nhạc 100%!
+          <div style={styles.safariBanner}>
+            💡 Để thoát ra màn hình chính & tắt màn hình nghe nhạc không bị ngắt, hãy mở địa chỉ này trực tiếp bằng trình duyệt <strong>Safari</strong> trên iPhone.
           </div>
         )}
 
-        <header style={styles.header}>
-          <div style={styles.headerTop}>
-            <span style={styles.badge}>🍏 iOS HARDWARE LOCK-SCREEN v4.0</span>
-            {sleepMinutesLeft > 0 && (
-              <span style={styles.sleepBadge}>🌙 Tắt sau {sleepMinutesLeft}p</span>
-            )}
-          </div>
-          <div style={styles.brandRow}>
-            <div>
-              <h1 style={styles.logo}>NOCTRA</h1>
-              <p style={styles.subtitle}>
-                Đồng bộ phần cứng iOS trực tiếp — Thoát Safari & Tắt màn hình vẫn phát 100%
-              </p>
+        {/* TOP BAR SANG TRỌNG */}
+        <header style={styles.topNav}>
+          <div style={styles.brandGroup}>
+            <div style={styles.logoMark}>
+              <Icons.YouTube />
             </div>
-            <div style={styles.tasteChip}>
-              Gu: {topTags.map((t) => `#${t}`).join(' ')}
+            <div>
+              <div style={styles.brandNameRow}>
+                <span style={styles.brandTitle}>NOCTRA</span>
+                <span style={styles.proPill}>YOUTUBE PRO</span>
+              </div>
+              <p style={styles.brandSub}>iOS Lock-Screen Audio Streamer</p>
+            </div>
+          </div>
+
+          <div style={styles.topRightGroup}>
+            {sleepMinutesLeft > 0 && (
+              <span style={styles.sleepBadge}>🌙 {sleepMinutesLeft}p</span>
+            )}
+            <div style={styles.tasteBadge}>
+              {topTags.slice(0, 2).map((t) => `#${t}`).join(' ')}
             </div>
           </div>
         </header>
 
         {toastMsg && <div style={styles.toast}>{toastMsg}</div>}
 
-        <section style={styles.playerCard}>
-          {currentSong && (
-            <div style={styles.nowPlayingRow}>
-              <img
-                src={currentSong.thumbnail}
-                alt={currentSong.title}
-                style={styles.cover}
-              />
-              <div style={styles.trackMeta}>
-                <div style={styles.statusRow}>
-                  <span style={styles.statusPill}>
-                    {loadingTrack
-                      ? '⚡ Đang nạp luồng...'
-                      : isPlaying
-                        ? '🔊 Đang phát nền (Thoát app & Khóa máy OK)'
-                        : '⏸ Chạm Phát để bắt đầu'}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => sendTasteSignal(currentSong.id, 'toggle_like')}
-                    style={{
-                      ...styles.likeBtn,
-                      color: currentSong.liked ? '#f43f5e' : '#94a3b8'
-                    }}
-                  >
-                    {currentSong.liked ? '♥ Đã thích' : '♡ Thích'}
-                  </button>
-                </div>
-                <h2 style={styles.trackTitle}>{currentSong.title}</h2>
-                <p style={styles.trackArtist}>{currentSong.artist}</p>
-                <div ref={timeLabelRef} style={styles.timeRow}>
-                  0:00 / 0:00
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/*
-            THẺ <AUDIO> PHẦN CỨNG ĐỘC LẬP (KHÔNG GẮN THUỘC TÍNH src={...} TRONG JSX!)
-            Nhờ không bị React can thiệp khi render lại và không tốn CPU khi ẩn trang,
-            tiến trình mediaserverd của iPhone giữ luồng nhạc sống 100% khi thoát ra màn hình chính hoặc tắt màn hình!
-          */}
-          <div style={styles.nativeAudioWrap}>
-            <audio
-              ref={audioRef}
-              controls
-              playsInline
-              preload="auto"
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleTimeUpdate}
-              onEnded={() => triggerNextTrackSync(true)}
-              onPlay={() => {
-                activateIosPlaybackSession();
-                setIsPlaying(true);
-                setLoadingTrack(false);
-                if (songsRef.current[currentIndexRef.current]) {
-                  updateMediaSessionMetadata(songsRef.current[currentIndexRef.current]);
-                }
-                if ('mediaSession' in navigator) {
-                  navigator.mediaSession.playbackState = 'playing';
-                }
-              }}
-              onPause={() => {
-                setIsPlaying(false);
-                if ('mediaSession' in navigator) {
-                  navigator.mediaSession.playbackState = 'paused';
-                }
-              }}
-              onWaiting={() => setLoadingTrack(true)}
-              onPlaying={() => setLoadingTrack(false)}
-              onError={() => {
-                setLoadingTrack(false);
-                // Tự động chuyển sang bài kế tiếp đồng bộ nếu luồng bị lỗi
-                if (songsRef.current.length > 1) {
-                  triggerNextTrackSync(true);
-                }
-              }}
-              style={styles.nativeAudio}
-            />
-          </div>
-
-          <div style={styles.controls}>
-            <button
-              type="button"
-              onClick={() => setShuffle((s) => !s)}
-              style={{
-                ...styles.iconBtn,
-                color: shuffle ? '#c084fc' : '#94a3b8',
-                background: shuffle ? 'rgba(192,132,252,0.18)' : 'rgba(255,255,255,0.06)'
-              }}
-            >
-              🔀
-            </button>
-
-            <button onClick={triggerPrevTrackSync} style={styles.secondaryBtn} type="button">
-              ⏮ Trước
-            </button>
-
-            <button
-              onClick={() => {
-                if (isPlaying) {
-                  pauseCurrentSync();
-                } else {
-                  const s = songsRef.current[currentIndexRef.current];
-                  if (s) playSongImperatively(s, currentIndexRef.current, true);
-                }
-              }}
-              style={styles.primaryBtn}
-              type="button"
-            >
-              {isPlaying ? '⏸ Tạm dừng' : '▶ Phát nhạc'}
-            </button>
-
-            <button
-              onClick={() => triggerNextTrackSync(false)}
-              style={styles.secondaryBtn}
-              type="button"
-            >
-              Tiếp ⏭
-            </button>
-
-            <button
-              type="button"
-              onClick={() => {
-                const modes = ['all', 'one'];
-                const next = modes[(modes.indexOf(loopMode) + 1) % modes.length];
-                setLoopMode(next);
-                showToast(next === 'one' ? '🔂 Lặp 1 bài hiện tại' : '🔁 Lặp toàn bộ danh sách');
-              }}
-              style={{
-                ...styles.iconBtn,
-                color: loopMode !== 'all' ? '#38bdf8' : '#94a3b8',
-                background: loopMode !== 'all' ? 'rgba(56,189,248,0.18)' : 'rgba(255,255,255,0.06)'
-              }}
-            >
-              {loopMode === 'one' ? '🔂' : '🔁'}
-            </button>
-          </div>
-
-          <div style={styles.utilityBar}>
-            <button
-              type="button"
-              style={styles.utilChip}
-              onClick={() => {
-                const options = [0, 15, 30, 45, 60];
-                const next = options[(options.indexOf(sleepMinutesLeft) + 1) % options.length];
-                setSleepMinutesLeft(next);
-                showToast(next ? `🌙 Hẹn giờ tắt sau ${next} phút` : 'Đã tắt hẹn giờ ngủ');
-              }}
-            >
-              🌙 {sleepMinutesLeft > 0 ? `Ngủ: ${sleepMinutesLeft}p` : 'Hẹn giờ ngủ'}
-            </button>
-
-            <button
-              type="button"
-              style={styles.utilChip}
-              onClick={() => {
-                const speeds = [1, 1.15, 1.25, 0.9];
-                const next = speeds[(speeds.indexOf(playbackRate) + 1) % speeds.length];
-                setPlaybackRate(next);
-                if (audioRef.current) audioRef.current.playbackRate = next;
-                showToast(`⚡ Tốc độ: ${next}x`);
-              }}
-            >
-              ⚡ Tốc độ: {playbackRate}x
-            </button>
-          </div>
-        </section>
-
-        {/* Thanh tìm kiếm & Dán nhanh */}
-        <section style={styles.omniCard}>
-          <form onSubmit={handleOmniSubmit} style={styles.omniRow}>
+        {/* THANH TÌM KIẾM YOUTUBE TRỰC TIẾP (OMNI SEARCH BAR) */}
+        <section style={styles.searchWrapper}>
+          <form onSubmit={handleOmniSubmit} style={styles.searchBox}>
+            <span style={styles.searchIconWrap}>
+              <Icons.Search />
+            </span>
             <input
               type="text"
-              placeholder="🔍 Gõ tên bài hát, ca sĩ hoặc dán link YouTube / MP3..."
+              placeholder="Tìm bài hát, ca sĩ trên YouTube hoặc dán link..."
               value={omniQuery}
               onChange={(e) => setOmniQuery(e.target.value)}
-              style={styles.omniInput}
+              style={styles.searchInput}
             />
             {omniQuery ? (
               <button
@@ -758,7 +775,7 @@ export default function App() {
                   setOmniQuery('');
                   setSearchResults([]);
                 }}
-                style={styles.clearBtn}
+                style={styles.clearSearchBtn}
               >
                 ✕
               </button>
@@ -766,59 +783,288 @@ export default function App() {
               <button
                 type="button"
                 onClick={handlePasteFromClipboard}
-                style={styles.pasteBtn}
+                style={styles.pastePillBtn}
               >
-                📋 Dán
+                Dán link
               </button>
             )}
-            <button type="submit" style={styles.omniSubmitBtn}>
-              Phát
-            </button>
           </form>
 
           {isSearching && (
-            <div style={styles.searchingHint}>Đang tìm nguồn nhạc chuẩn phần cứng iOS...</div>
+            <div style={styles.searchingBar}>
+              <Icons.YouTube />
+              <span>Đang tìm kiếm trên YouTube...</span>
+            </div>
           )}
 
           {searchResults.length > 0 && (
             <div style={styles.searchDropdown}>
-              {searchResults.map((item, i) => (
+              <div style={styles.dropdownHeader}>
+                <span>KẾT QUẢ TỪ YOUTUBE (CHẠM ĐỂ PHÁT NGAY)</span>
+                <button
+                  type="button"
+                  onClick={() => setSearchResults([])}
+                  style={styles.closeDropBtn}
+                >
+                  Đóng
+                </button>
+              </div>
+              {searchResults.map((item) => (
                 <div
-                  key={item.id || item.youtubeId || i}
+                  key={item.youtubeId}
                   onClick={() => {
-                    handleQuickPlayTrack(item);
+                    handleQuickPlayYouTubeTrack(item);
                     setOmniQuery('');
                     setSearchResults([]);
                   }}
-                  style={styles.searchResultItem}
+                  style={styles.dropdownItem}
                 >
-                  <img src={item.thumbnail} alt={item.title} style={styles.thumbSmall} />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={styles.songName}>{item.title}</div>
-                    <div style={styles.songSub}>
-                      {item.artist} •{' '}
-                      <span style={{ color: item.source === 'apple_cdn' ? '#34d399' : '#c084fc' }}>
-                        {item.source === 'apple_cdn' ? '🍏 Apple M4A Siêu tốc' : 'YouTube M4A'}
-                      </span>
-                    </div>
+                  <div style={styles.dropThumbWrap}>
+                    <img src={item.thumbnail} alt={item.title} style={styles.dropThumb} />
+                    {item.durationText && (
+                      <span style={styles.durationBadge}>{item.durationText}</span>
+                    )}
                   </div>
-                  <span style={styles.playNowPill}>▶ Phát</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={styles.dropTitle}>{item.title}</div>
+                    <div style={styles.dropSub}>{item.artist}</div>
+                  </div>
+                  <div style={styles.playBadgeBtn}>
+                    <Icons.Play />
+                  </div>
                 </div>
               ))}
             </div>
           )}
         </section>
 
-        <div style={styles.tabBar}>
+        {/* HERO NOW-PLAYING CARD (CHUẨN APPLE MUSIC / SPOTIFY LUXURY) */}
+        {currentSong && (
+          <section style={styles.heroCard}>
+            <div style={styles.artworkShowcase}>
+              <div style={styles.artworkGlowWrap}>
+                <img
+                  src={currentSong.thumbnail}
+                  alt={currentSong.title}
+                  style={{
+                    ...styles.heroArtwork,
+                    transform: isPlaying ? 'scale(1.02)' : 'scale(0.96)'
+                  }}
+                />
+                {/* Sóng nhạc Equalizer động khi đang phát */}
+                <div style={styles.liveStatusOverlay}>
+                  <Icons.YouTube />
+                  <span>
+                    {loadingTrack
+                      ? 'Đang giải mã luồng YouTube...'
+                      : isPlaying
+                        ? 'YouTube M4A • Khóa màn hình OK'
+                        : ' Đã sẵn sàng'}
+                  </span>
+                  {isPlaying && !loadingTrack && (
+                    <div style={styles.eqBars}>
+                      <span style={{ ...styles.eqBar, animation: 'eqBar1 0.8s infinite ease-in-out' }} />
+                      <span style={{ ...styles.eqBar, animation: 'eqBar2 0.7s infinite ease-in-out' }} />
+                      <span style={{ ...styles.eqBar, animation: 'eqBar3 0.9s infinite ease-in-out' }} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div style={styles.trackHeaderRow}>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <h2 style={styles.heroTitle}>{currentSong.title}</h2>
+                <p style={styles.heroArtist}>{currentSong.artist}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => sendTasteSignal(currentSong.id, 'toggle_like')}
+                style={styles.heartButton}
+                title="Yêu thích"
+              >
+                <Icons.Heart filled={currentSong.liked} />
+              </button>
+            </div>
+
+            {/* THANH TRƯỢT TUA NHẠC NEON (CUSTOM GLOW SEEK BAR) */}
+            <div style={styles.seekSection}>
+              <div style={styles.seekTrackBg}>
+                <div ref={progressFillRef} style={styles.seekTrackFill} />
+                <input
+                  ref={progressInputRef}
+                  type="range"
+                  min={0}
+                  max={100}
+                  defaultValue={0}
+                  step="0.1"
+                  className="noctra-range"
+                  onTouchStart={() => {
+                    isSeekingRef.current = true;
+                  }}
+                  onMouseDown={() => {
+                    isSeekingRef.current = true;
+                  }}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    const max = Number(e.target.max) || 100;
+                    if (progressFillRef.current) {
+                      progressFillRef.current.style.width = `${Math.min(100, (val / max) * 100)}%`;
+                    }
+                    if (curTimeTextRef.current) {
+                      curTimeTextRef.current.textContent = formatTime(val);
+                    }
+                  }}
+                  onTouchEnd={(e) => {
+                    if (audioRef.current) {
+                      audioRef.current.currentTime = Number(e.target.value);
+                    }
+                    isSeekingRef.current = false;
+                  }}
+                  onMouseUp={(e) => {
+                    if (audioRef.current) {
+                      audioRef.current.currentTime = Number(e.target.value);
+                    }
+                    isSeekingRef.current = false;
+                  }}
+                />
+              </div>
+              <div style={styles.timeLineRow}>
+                <span ref={curTimeTextRef}>0:00</span>
+                <span ref={durTimeTextRef}>{currentSong.durationText || '0:00'}</span>
+              </div>
+            </div>
+
+            {/* CỤM ĐIỀU KHIỂN CHÍNH (LUXURY VECTOR CONTROLS) */}
+            <div style={styles.mainControlsRow}>
+              <button
+                type="button"
+                onClick={() => {
+                  setShuffle((s) => !s);
+                  showToast(!shuffle ? '🔀 Đã bật Trộn bài ngẫu nhiên' : 'Đã tắt Trộn bài');
+                }}
+                style={{
+                  ...styles.sideControlBtn,
+                  color: shuffle ? '#c084fc' : '#64748b',
+                  background: shuffle ? 'rgba(192, 132, 252, 0.15)' : 'transparent'
+                }}
+              >
+                <Icons.Shuffle />
+              </button>
+
+              <button
+                type="button"
+                onClick={triggerPrevTrackSync}
+                style={styles.skipControlBtn}
+              >
+                <Icons.Prev />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (isPlaying) {
+                    pauseCurrentSync();
+                  } else {
+                    const s = songsRef.current[currentIndexRef.current];
+                    if (s) playSongImperatively(s, currentIndexRef.current, true);
+                  }
+                }}
+                style={styles.playCircleBtn}
+              >
+                {isPlaying ? <Icons.Pause /> : <Icons.Play />}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => triggerNextTrackSync(false)}
+                style={styles.skipControlBtn}
+              >
+                <Icons.Next />
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const modes = ['radio', 'all', 'one'];
+                  const next = modes[(modes.indexOf(loopMode) + 1) % modes.length];
+                  setLoopMode(next);
+                  const labels = {
+                    radio: '📻 Auto-Radio: Tự phát tiếp nhạc YouTube hợp Gu',
+                    all: '🔁 Lặp lại danh sách phát',
+                    one: '🔂 Lặp lại 1 bài hiện tại'
+                  };
+                  showToast(labels[next]);
+                }}
+                style={{
+                  ...styles.sideControlBtn,
+                  color: loopMode !== 'all' ? '#38bdf8' : '#64748b',
+                  background: loopMode !== 'all' ? 'rgba(56, 189, 248, 0.15)' : 'transparent'
+                }}
+              >
+                <Icons.Repeat />
+              </button>
+            </div>
+
+            {/* THANH TIỆN ÍCH PHỤ */}
+            <div style={styles.quickActionRow}>
+              <button
+                type="button"
+                style={styles.quickPill}
+                onClick={() => {
+                  const modes = ['radio', 'all', 'one'];
+                  const next = modes[(modes.indexOf(loopMode) + 1) % modes.length];
+                  setLoopMode(next);
+                }}
+              >
+                {loopMode === 'radio'
+                  ? '📻 Tự phát theo Gu: BẬT'
+                  : loopMode === 'one'
+                    ? '🔂 Chế độ: Lặp 1 bài'
+                    : '🔁 Chế độ: Lặp danh sách'}
+              </button>
+
+              <button
+                type="button"
+                style={styles.quickPill}
+                onClick={() => {
+                  const options = [0, 15, 30, 45, 60];
+                  const next = options[(options.indexOf(sleepMinutesLeft) + 1) % options.length];
+                  setSleepMinutesLeft(next);
+                  showToast(next ? `🌙 Hẹn giờ tắt nhạc sau ${next} phút` : 'Đã tắt hẹn giờ ngủ');
+                }}
+              >
+                🌙 {sleepMinutesLeft > 0 ? `Ngủ: ${sleepMinutesLeft}p` : 'Hẹn giờ ngủ'}
+              </button>
+
+              <button
+                type="button"
+                style={styles.quickPill}
+                onClick={() => {
+                  const speeds = [1, 1.15, 1.25, 0.9];
+                  const next = speeds[(speeds.indexOf(playbackRate) + 1) % speeds.length];
+                  setPlaybackRate(next);
+                  if (audioRef.current) audioRef.current.playbackRate = next;
+                  showToast(`⚡ Tốc độ: ${next}x`);
+                }}
+              >
+                ⚡ {playbackRate}x
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* CHUYỂN TAB: DANH SÁCH PHÁT & KHÁM PHÁ YOUTUBE THEO GU */}
+        <div style={styles.segmentedControl}>
           <button
             type="button"
             onClick={() => setActiveTab('library')}
             style={{
-              ...styles.tabBtn,
-              ...(activeTab === 'library' ? styles.tabBtnActive : {})
+              ...styles.segmentBtn,
+              ...(activeTab === 'library' ? styles.segmentBtnActive : {})
             }}
           >
-            🎵 Danh sách phát ({songs.length})
+            Danh sách phát ({songs.length})
           </button>
           <button
             type="button"
@@ -827,21 +1073,22 @@ export default function App() {
               fetchRecommendations(selectedMood);
             }}
             style={{
-              ...styles.tabBtn,
-              ...(activeTab === 'discover' ? styles.tabBtnActive : {})
+              ...styles.segmentBtn,
+              ...(activeTab === 'discover' ? styles.segmentBtnActive : {})
             }}
           >
-            ✨ Đề xuất theo Gu ({recommendations.length})
+            ✨ Đề xuất YouTube ({recommendations.length})
           </button>
         </div>
 
+        {/* DANH SÁCH BÀI HÁT TRONG THƯ VIỆN */}
         {activeTab === 'library' && (
-          <section style={styles.listSection}>
+          <section style={styles.trackList}>
             {songs.map((song, idx) => {
               const active = idx === currentIndex;
               return (
                 <div
-                  key={song.id}
+                  key={song.id || song.youtubeId}
                   onClick={() => {
                     if (active) {
                       if (isPlaying) pauseCurrentSync();
@@ -851,41 +1098,47 @@ export default function App() {
                     }
                   }}
                   style={{
-                    ...styles.songItem,
-                    borderColor: active ? '#a855f7' : 'rgba(255,255,255,0.07)',
-                    background: active
-                      ? 'linear-gradient(90deg, rgba(168,85,247,0.22), rgba(59,130,246,0.10))'
-                      : 'rgba(255,255,255,0.03)'
+                    ...styles.trackCard,
+                    ...(active ? styles.trackCardActive : {})
                   }}
                 >
-                  <img src={song.thumbnail} alt={song.title} style={styles.thumbSmall} />
+                  <div style={styles.trackThumbWrap}>
+                    <img src={song.thumbnail} alt={song.title} style={styles.trackThumb} />
+                    {song.durationText && (
+                      <span style={styles.durationMini}>{song.durationText}</span>
+                    )}
+                  </div>
+
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={styles.songName}>
-                      {active && isPlaying ? '🔊 ' : ''}
+                    <div
+                      style={{
+                        ...styles.trackItemTitle,
+                        color: active ? '#e879f9' : '#f8fafc'
+                      }}
+                    >
                       {song.title}
                     </div>
-                    <div style={styles.songSub}>{song.artist}</div>
+                    <div style={styles.trackItemArtist}>{song.artist}</div>
                   </div>
+
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       sendTasteSignal(song.id, 'toggle_like');
                     }}
-                    style={{
-                      ...styles.heartMiniBtn,
-                      color: song.liked ? '#f43f5e' : '#64748b'
-                    }}
+                    style={styles.miniActionBtn}
                   >
-                    {song.liked ? '♥' : '♡'}
+                    <Icons.Heart filled={song.liked} />
                   </button>
+
                   <button
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
                       handleDeleteSong(song.id, idx);
                     }}
-                    style={styles.deleteBtn}
+                    style={styles.deleteTrackBtn}
                   >
                     ✕
                   </button>
@@ -895,9 +1148,10 @@ export default function App() {
           </section>
         )}
 
+        {/* KHÁM PHÁ YOUTUBE THEO GU NGƯỜI DÙNG */}
         {activeTab === 'discover' && (
-          <section style={styles.discoverSection}>
-            <div style={styles.moodScroll}>
+          <section style={styles.discoverWrap}>
+            <div style={styles.moodRow}>
               {MOOD_FILTERS.map((m) => (
                 <button
                   key={m.id}
@@ -907,8 +1161,8 @@ export default function App() {
                     fetchRecommendations(m.id);
                   }}
                   style={{
-                    ...styles.moodPill,
-                    ...(selectedMood === m.id ? styles.moodPillActive : {})
+                    ...styles.moodChip,
+                    ...(selectedMood === m.id ? styles.moodChipActive : {})
                   }}
                 >
                   {m.label}
@@ -916,21 +1170,39 @@ export default function App() {
               ))}
             </div>
 
-            <div style={styles.listSection}>
-              {recommendations.map((rec, i) => (
+            <div style={styles.recSubHeader}>
+              <span>Gợi ý trực tiếp từ YouTube dựa trên gu nghe nhạc của bạn</span>
+              <button
+                type="button"
+                onClick={() => fetchRecommendations(selectedMood)}
+                style={styles.refreshRecBtn}
+              >
+                {loadingRecs ? 'Đang tải...' : 'Làm mới'}
+              </button>
+            </div>
+
+            <div style={styles.trackList}>
+              {recommendations.map((rec) => (
                 <div
-                  key={rec.id || rec.youtubeId || i}
-                  onClick={() => handleQuickPlayTrack(rec)}
-                  style={styles.songItem}
+                  key={rec.youtubeId}
+                  onClick={() => handleQuickPlayYouTubeTrack(rec)}
+                  style={styles.trackCard}
                 >
-                  <img src={rec.thumbnail} alt={rec.title} style={styles.thumbSmall} />
+                  <div style={styles.trackThumbWrap}>
+                    <img src={rec.thumbnail} alt={rec.title} style={styles.trackThumb} />
+                    {rec.durationText && (
+                      <span style={styles.durationMini}>{rec.durationText}</span>
+                    )}
+                  </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={styles.songName}>{rec.title}</div>
-                    <div style={styles.songSub}>
+                    <div style={styles.trackItemTitle}>{rec.title}</div>
+                    <div style={styles.trackItemArtist}>
                       {rec.artist} • <span style={{ color: '#c084fc' }}>{rec.reason}</span>
                     </div>
                   </div>
-                  <span style={styles.playNowPill}>+ Phát ngay</span>
+                  <div style={styles.playBadgeBtn}>
+                    <Icons.Play />
+                  </div>
                 </div>
               ))}
             </div>
@@ -944,413 +1216,630 @@ export default function App() {
 const styles = {
   page: {
     minHeight: '100vh',
-    background: '#07080d',
+    background: '#050508',
     color: '#f8fafc',
-    fontFamily: '-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif',
-    paddingTop: 'max(18px, env(safe-area-inset-top))',
-    paddingBottom: 'max(42px, env(safe-area-inset-bottom))',
-    paddingLeft: 14,
-    paddingRight: 14,
+    paddingTop: 'max(16px, env(safe-area-inset-top))',
+    paddingBottom: 'max(48px, env(safe-area-inset-bottom))',
+    paddingLeft: 16,
+    paddingRight: 16,
     position: 'relative',
     overflowX: 'hidden'
   },
-  ambientGlow: {
+  hiddenHardwareAudio: {
     position: 'fixed',
-    top: '-15%',
-    left: '-15%',
-    width: '130%',
-    height: '55%',
+    bottom: 0,
+    left: 0,
+    width: 1,
+    height: 1,
+    opacity: 0.01,
+    pointerEvents: 'none',
+    zIndex: -1
+  },
+  ambientOrbTop: {
+    position: 'fixed',
+    top: '-18%',
+    left: '-20%',
+    width: '140%',
+    height: '58%',
     backgroundSize: 'cover',
     backgroundPosition: 'center',
-    filter: 'blur(90px) saturate(180%)',
-    opacity: 0.22,
+    filter: 'blur(95px) saturate(210%)',
+    opacity: 0.34,
+    pointerEvents: 'none',
+    zIndex: 0,
+    transition: 'background-image 0.8s ease'
+  },
+  ambientOrbBottom: {
+    position: 'fixed',
+    bottom: '-25%',
+    right: '-20%',
+    width: '120%',
+    height: '50%',
+    backgroundSize: 'cover',
+    backgroundPosition: 'center',
+    filter: 'blur(110px) saturate(190%)',
+    opacity: 0.18,
     pointerEvents: 'none',
     zIndex: 0
   },
   container: {
-    maxWidth: 520,
+    maxWidth: 460,
     margin: '0 auto',
     position: 'relative',
-    zIndex: 1
+    zIndex: 2
   },
-  safariWarning: {
-    background: 'rgba(245, 158, 11, 0.18)',
-    border: '1px solid rgba(245, 158, 11, 0.5)',
+  safariBanner: {
+    background: 'rgba(245, 158, 11, 0.16)',
+    border: '1px solid rgba(245, 158, 11, 0.4)',
     color: '#fde68a',
-    padding: '10px 12px',
-    borderRadius: 14,
+    padding: '10px 14px',
+    borderRadius: 16,
     fontSize: 12,
     lineHeight: 1.45,
-    marginBottom: 12
+    marginBottom: 14
   },
-  header: { marginBottom: 14 },
-  headerTop: {
+  topNav: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 6
+    marginBottom: 14
   },
-  badge: {
-    display: 'inline-block',
-    fontSize: 10,
-    fontWeight: 700,
-    letterSpacing: '0.06em',
-    color: '#86efac',
-    background: 'rgba(34, 197, 94, 0.18)',
-    border: '1px solid rgba(34, 197, 94, 0.35)',
-    padding: '4px 10px',
-    borderRadius: 999
+  brandGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10
+  },
+  logoMark: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    background: 'rgba(239, 68, 68, 0.14)',
+    border: '1px solid rgba(239, 68, 68, 0.3)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
+  brandNameRow: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7
+  },
+  brandTitle: {
+    fontSize: 20,
+    fontWeight: 800,
+    letterSpacing: '-0.03em',
+    color: '#ffffff'
+  },
+  proPill: {
+    fontSize: 9,
+    fontWeight: 800,
+    letterSpacing: '0.08em',
+    padding: '3px 7px',
+    borderRadius: 999,
+    background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+    color: '#ffffff'
+  },
+  brandSub: {
+    margin: '1px 0 0',
+    fontSize: 11,
+    color: '#94a3b8'
+  },
+  topRightGroup: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6
   },
   sleepBadge: {
     fontSize: 11,
-    fontWeight: 600,
+    fontWeight: 700,
     color: '#fde047',
     background: 'rgba(250, 204, 21, 0.14)',
-    padding: '4px 10px',
+    padding: '5px 10px',
     borderRadius: 999
   },
-  brandRow: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    gap: 10
-  },
-  logo: {
-    margin: 0,
-    fontSize: 28,
-    fontWeight: 900,
-    letterSpacing: '-0.03em'
-  },
-  subtitle: {
-    margin: '2px 0 0',
-    fontSize: 12,
-    color: '#94a3b8'
-  },
-  tasteChip: {
+  tasteBadge: {
     fontSize: 11,
-    color: '#cbd5e1',
-    background: 'rgba(255,255,255,0.06)',
+    fontWeight: 600,
+    color: '#e2e8f0',
+    background: 'rgba(255, 255, 255, 0.07)',
+    border: '1px solid rgba(255, 255, 255, 0.1)',
     padding: '5px 10px',
-    borderRadius: 10,
-    whiteSpace: 'nowrap'
+    borderRadius: 999
   },
   toast: {
     position: 'fixed',
-    bottom: 'max(22px, env(safe-area-inset-bottom))',
+    bottom: 'max(24px, env(safe-area-inset-bottom))',
     left: '50%',
     transform: 'translateX(-50%)',
-    background: 'rgba(15, 23, 42, 0.95)',
-    border: '1px solid rgba(192, 132, 252, 0.45)',
-    color: '#f8fafc',
+    background: 'rgba(15, 18, 30, 0.94)',
+    backdropFilter: 'blur(20px)',
+    WebkitBackdropFilter: 'blur(20px)',
+    border: '1px solid rgba(168, 85, 247, 0.5)',
+    color: '#ffffff',
     padding: '10px 18px',
     borderRadius: 999,
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: 600,
-    zIndex: 99
+    zIndex: 100,
+    boxShadow: '0 14px 34px rgba(0, 0, 0, 0.6)',
+    whiteSpace: 'nowrap'
   },
-  playerCard: {
-    background: 'rgba(17, 20, 34, 0.85)',
+  searchWrapper: {
+    position: 'relative',
+    marginBottom: 16
+  },
+  searchBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    background: 'rgba(255, 255, 255, 0.06)',
     backdropFilter: 'blur(24px)',
     WebkitBackdropFilter: 'blur(24px)',
-    border: '1px solid rgba(168, 85, 247, 0.35)',
-    borderRadius: 24,
-    padding: 16,
-    marginBottom: 14,
-    boxShadow: '0 16px 40px rgba(0,0,0,0.5)'
-  },
-  nowPlayingRow: {
-    display: 'flex',
-    gap: 14,
-    alignItems: 'center',
-    marginBottom: 12
-  },
-  cover: {
-    width: 78,
-    height: 78,
+    border: '1px solid rgba(255, 255, 255, 0.11)',
     borderRadius: 16,
-    objectFit: 'cover',
-    flexShrink: 0
+    padding: '6px 8px 6px 14px'
   },
-  trackMeta: { minWidth: 0, flex: 1 },
-  statusRow: {
+  searchIconWrap: {
+    color: '#94a3b8',
+    display: 'flex',
+    alignItems: 'center'
+  },
+  searchInput: {
+    flex: 1,
+    minWidth: 0,
+    background: 'transparent',
+    border: 'none',
+    outline: 'none',
+    color: '#ffffff',
+    fontSize: 13.5,
+    padding: '7px 0'
+  },
+  clearSearchBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: '#94a3b8',
+    fontSize: 15,
+    padding: '6px 8px',
+    cursor: 'pointer'
+  },
+  pastePillBtn: {
+    background: 'rgba(255, 255, 255, 0.1)',
+    border: 'none',
+    color: '#f1f5f9',
+    fontSize: 11.5,
+    fontWeight: 700,
+    padding: '8px 12px',
+    borderRadius: 11,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap'
+  },
+  searchingBar: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    fontSize: 12,
+    color: '#cbd5e1',
+    padding: '8px 12px'
+  },
+  searchDropdown: {
+    marginTop: 8,
+    background: 'rgba(13, 16, 27, 0.96)',
+    backdropFilter: 'blur(28px)',
+    WebkitBackdropFilter: 'blur(28px)',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    borderRadius: 20,
+    padding: 10,
+    maxHeight: 330,
+    overflowY: 'auto',
+    boxShadow: '0 20px 50px rgba(0,0,0,0.75)'
+  },
+  dropdownHeader: {
     display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 4
+    fontSize: 10.5,
+    fontWeight: 700,
+    letterSpacing: '0.06em',
+    color: '#94a3b8',
+    padding: '2px 6px 8px'
   },
-  statusPill: {
-    fontSize: 11,
-    color: '#86efac',
-    fontWeight: 600
-  },
-  likeBtn: {
+  closeDropBtn: {
     background: 'transparent',
     border: 'none',
-    fontSize: 12,
-    fontWeight: 700,
-    cursor: 'pointer'
-  },
-  trackTitle: {
-    margin: '0 0 3px',
-    fontSize: 17,
-    fontWeight: 800,
-    whiteSpace: 'nowrap',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis'
-  },
-  trackArtist: {
-    margin: '0 0 4px',
-    fontSize: 13,
-    color: '#94a3b8'
-  },
-  timeRow: {
-    fontSize: 12,
     color: '#cbd5e1',
-    fontVariantNumeric: 'tabular-nums'
-  },
-  nativeAudioWrap: {
-    marginBottom: 12,
-    background: 'rgba(255,255,255,0.05)',
-    padding: '6px 8px',
-    borderRadius: 14
-  },
-  nativeAudio: {
-    width: '100%',
-    height: 38,
-    display: 'block'
-  },
-  controls: {
-    display: 'flex',
-    gap: 8,
-    alignItems: 'center',
-    marginBottom: 10
-  },
-  iconBtn: {
-    width: 42,
-    height: 44,
-    borderRadius: 12,
-    border: 'none',
-    fontSize: 16,
-    cursor: 'pointer'
-  },
-  primaryBtn: {
-    flex: 1.5,
-    height: 46,
-    background: 'linear-gradient(135deg, #9333ea, #6366f1)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 14,
-    fontWeight: 800,
-    fontSize: 15,
-    cursor: 'pointer'
-  },
-  secondaryBtn: {
-    flex: 1,
-    height: 44,
-    background: 'rgba(255,255,255,0.08)',
-    color: '#f1f5f9',
-    border: 'none',
-    borderRadius: 12,
-    fontWeight: 700,
-    fontSize: 13,
-    cursor: 'pointer'
-  },
-  utilityBar: {
-    display: 'flex',
-    gap: 8
-  },
-  utilChip: {
-    flex: 1,
-    background: 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.08)',
-    color: '#cbd5e1',
-    borderRadius: 10,
-    padding: '8px',
-    fontSize: 12,
+    fontSize: 11.5,
     fontWeight: 600,
     cursor: 'pointer'
   },
-  omniCard: {
-    background: 'rgba(255,255,255,0.04)',
-    border: '1px solid rgba(255,255,255,0.1)',
-    borderRadius: 18,
-    padding: 10,
-    marginBottom: 14
-  },
-  omniRow: {
-    display: 'flex',
-    gap: 6,
-    alignItems: 'center'
-  },
-  omniInput: {
-    flex: 1,
-    minWidth: 0,
-    background: '#0d101b',
-    border: '1px solid rgba(255,255,255,0.12)',
-    borderRadius: 12,
-    padding: '11px 12px',
-    color: '#fff',
-    fontSize: 13
-  },
-  pasteBtn: {
-    background: 'rgba(255,255,255,0.08)',
-    color: '#e2e8f0',
-    border: 'none',
-    borderRadius: 10,
-    padding: '10px',
-    fontSize: 12,
-    fontWeight: 600,
-    cursor: 'pointer'
-  },
-  clearBtn: {
-    background: 'transparent',
-    color: '#94a3b8',
-    border: 'none',
-    fontSize: 15,
-    padding: '8px',
-    cursor: 'pointer'
-  },
-  omniSubmitBtn: {
-    background: '#7c3aed',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 12,
-    padding: '11px 14px',
-    fontWeight: 700,
-    fontSize: 13,
-    cursor: 'pointer'
-  },
-  searchingHint: {
-    fontSize: 12,
-    color: '#a855f7',
-    padding: '8px 4px 2px'
-  },
-  searchDropdown: {
-    marginTop: 10,
-    borderTop: '1px solid rgba(255,255,255,0.08)',
-    paddingTop: 8,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    maxHeight: 280,
-    overflowY: 'auto'
-  },
-  searchResultItem: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    padding: '8px 10px',
-    borderRadius: 12,
-    background: 'rgba(255,255,255,0.04)',
-    cursor: 'pointer'
-  },
-  playNowPill: {
-    fontSize: 11,
-    fontWeight: 700,
-    color: '#d8b4fe',
-    background: 'rgba(168, 85, 247, 0.2)',
-    padding: '6px 10px',
-    borderRadius: 999,
-    whiteSpace: 'nowrap'
-  },
-  tabBar: {
-    display: 'flex',
-    gap: 8,
-    marginBottom: 12
-  },
-  tabBtn: {
-    flex: 1,
-    padding: '11px 12px',
-    borderRadius: 12,
-    border: '1px solid rgba(255,255,255,0.08)',
-    background: 'rgba(255,255,255,0.03)',
-    color: '#94a3b8',
-    fontWeight: 700,
-    fontSize: 13,
-    cursor: 'pointer'
-  },
-  tabBtnActive: {
-    background: 'rgba(168, 85, 247, 0.2)',
-    borderColor: '#a855f7',
-    color: '#f8fafc'
-  },
-  listSection: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 8
-  },
-  songItem: {
+  dropdownItem: {
     display: 'flex',
     alignItems: 'center',
     gap: 12,
-    padding: '10px 12px',
-    borderRadius: 16,
-    border: '1px solid rgba(255,255,255,0.07)',
-    background: 'rgba(255,255,255,0.03)',
-    cursor: 'pointer'
+    padding: '8px',
+    borderRadius: 14,
+    cursor: 'pointer',
+    transition: 'background 0.15s ease'
   },
-  thumbSmall: {
-    width: 48,
-    height: 48,
+  dropThumbWrap: {
+    position: 'relative',
+    width: 64,
+    height: 44,
     borderRadius: 10,
-    objectFit: 'cover',
+    overflow: 'hidden',
     flexShrink: 0
   },
-  songName: {
-    fontSize: 14,
+  dropThumb: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+  },
+  durationBadge: {
+    position: 'absolute',
+    bottom: 3,
+    right: 3,
+    background: 'rgba(0,0,0,0.82)',
+    color: '#fff',
+    fontSize: 9.5,
+    fontWeight: 700,
+    padding: '1px 4px',
+    borderRadius: 4
+  },
+  dropTitle: {
+    fontSize: 13.5,
+    fontWeight: 700,
+    color: '#f8fafc',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  },
+  dropSub: {
+    fontSize: 11.5,
+    color: '#94a3b8',
+    marginTop: 2
+  },
+  playBadgeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: '50%',
+    background: 'rgba(168, 85, 247, 0.2)',
+    color: '#e879f9',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0
+  },
+  heroCard: {
+    background: 'linear-gradient(165deg, rgba(25, 28, 46, 0.78), rgba(11, 13, 23, 0.88))',
+    backdropFilter: 'blur(32px)',
+    WebkitBackdropFilter: 'blur(32px)',
+    border: '1px solid rgba(255, 255, 255, 0.12)',
+    borderRadius: 28,
+    padding: '18px 18px 16px',
+    marginBottom: 18,
+    boxShadow: '0 24px 60px rgba(0, 0, 0, 0.65)'
+  },
+  artworkShowcase: {
+    marginBottom: 16
+  },
+  artworkGlowWrap: {
+    position: 'relative',
+    width: '100%',
+    height: 215,
+    borderRadius: 20,
+    overflow: 'hidden',
+    boxShadow: '0 16px 38px rgba(0, 0, 0, 0.55)'
+  },
+  heroArtwork: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+    transition: 'transform 0.5s cubic-bezier(0.22, 1, 0.36, 1)'
+  },
+  liveStatusOverlay: {
+    position: 'absolute',
+    bottom: 10,
+    left: 10,
+    right: 10,
+    background: 'rgba(8, 10, 18, 0.78)',
+    backdropFilter: 'blur(14px)',
+    WebkitBackdropFilter: 'blur(14px)',
+    border: '1px solid rgba(255, 255, 255, 0.14)',
+    borderRadius: 12,
+    padding: '6px 10px',
+    display: 'flex',
+    alignItems: 'center',
+    gap: 7,
+    fontSize: 11,
+    fontWeight: 600,
+    color: '#e2e8f0'
+  },
+  eqBars: {
+    marginLeft: 'auto',
+    display: 'flex',
+    alignItems: 'flex-end',
+    gap: 2.5,
+    height: 18
+  },
+  eqBar: {
+    width: 3,
+    height: 10,
+    borderRadius: 2,
+    background: 'linear-gradient(180deg, #ec4899, #a855f7)'
+  },
+  trackHeaderRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14
+  },
+  heroTitle: {
+    margin: 0,
+    fontSize: 18,
+    fontWeight: 800,
+    letterSpacing: '-0.02em',
+    color: '#ffffff',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  },
+  heroArtist: {
+    margin: '4px 0 0',
+    fontSize: 13.5,
+    fontWeight: 500,
+    color: '#94a3b8',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  },
+  heartButton: {
+    width: 42,
+    height: 42,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.06)',
+    border: '1px solid rgba(255, 255, 255, 0.09)',
+    color: '#cbd5e1',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    flexShrink: 0
+  },
+  seekSection: {
+    marginBottom: 16
+  },
+  seekTrackBg: {
+    position: 'relative',
+    height: 6,
+    borderRadius: 999,
+    background: 'rgba(255, 255, 255, 0.14)',
+    display: 'flex',
+    alignItems: 'center'
+  },
+  seekTrackFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '0%',
+    borderRadius: 999,
+    background: 'linear-gradient(90deg, #a855f7, #ec4899, #38bdf8)',
+    pointerEvents: 'none',
+    zIndex: 1
+  },
+  timeLineRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    fontSize: 11.5,
+    fontWeight: 600,
+    color: '#94a3b8',
+    marginTop: 8,
+    fontVariantNumeric: 'tabular-nums'
+  },
+  mainControlsRow: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: '0 6px',
+    marginBottom: 14
+  },
+  sideControlBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    border: 'none',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer'
+  },
+  skipControlBtn: {
+    width: 48,
+    height: 48,
+    borderRadius: '50%',
+    background: 'rgba(255, 255, 255, 0.07)',
+    border: '1px solid rgba(255, 255, 255, 0.09)',
+    color: '#ffffff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer'
+  },
+  playCircleBtn: {
+    width: 64,
+    height: 64,
+    borderRadius: '50%',
+    background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+    border: 'none',
+    color: '#ffffff',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    boxShadow: '0 10px 28px rgba(168, 85, 247, 0.55)'
+  },
+  quickActionRow: {
+    display: 'flex',
+    gap: 6
+  },
+  quickPill: {
+    flex: 1,
+    background: 'rgba(255, 255, 255, 0.05)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    color: '#cbd5e1',
+    borderRadius: 11,
+    padding: '7px 6px',
+    fontSize: 11,
+    fontWeight: 600,
+    cursor: 'pointer',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis'
+  },
+  segmentedControl: {
+    display: 'flex',
+    background: 'rgba(255, 255, 255, 0.05)',
+    border: '1px solid rgba(255, 255, 255, 0.08)',
+    borderRadius: 15,
+    padding: 4,
+    marginBottom: 14
+  },
+  segmentBtn: {
+    flex: 1,
+    background: 'transparent',
+    border: 'none',
+    color: '#94a3b8',
+    fontSize: 13,
+    fontWeight: 700,
+    padding: '9px 10px',
+    borderRadius: 11,
+    cursor: 'pointer',
+    transition: 'all 0.2s ease'
+  },
+  segmentBtnActive: {
+    background: 'rgba(168, 85, 247, 0.24)',
+    color: '#ffffff',
+    boxShadow: '0 4px 14px rgba(0, 0, 0, 0.3)'
+  },
+  trackList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 8
+  },
+  trackCard: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 12,
+    padding: '9px 11px',
+    borderRadius: 16,
+    background: 'rgba(255, 255, 255, 0.035)',
+    border: '1px solid rgba(255, 255, 255, 0.07)',
+    cursor: 'pointer',
+    transition: 'all 0.15s ease'
+  },
+  trackCardActive: {
+    background: 'linear-gradient(90deg, rgba(168, 85, 247, 0.2), rgba(236, 72, 153, 0.08))',
+    borderColor: 'rgba(192, 132, 252, 0.45)'
+  },
+  trackThumbWrap: {
+    position: 'relative',
+    width: 62,
+    height: 44,
+    borderRadius: 10,
+    overflow: 'hidden',
+    flexShrink: 0
+  },
+  trackThumb: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover'
+  },
+  durationMini: {
+    position: 'absolute',
+    bottom: 2,
+    right: 3,
+    background: 'rgba(0,0,0,0.8)',
+    color: '#fff',
+    fontSize: 9,
+    fontWeight: 700,
+    padding: '1px 4px',
+    borderRadius: 4
+  },
+  trackItemTitle: {
+    fontSize: 13.5,
     fontWeight: 700,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis'
   },
-  songSub: {
-    fontSize: 12,
+  trackItemArtist: {
+    fontSize: 11.5,
     color: '#94a3b8',
     marginTop: 2,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis'
   },
-  heartMiniBtn: {
+  miniActionBtn: {
     background: 'transparent',
     border: 'none',
-    fontSize: 17,
-    padding: '4px 6px',
-    cursor: 'pointer'
-  },
-  deleteBtn: {
-    background: 'transparent',
     color: '#64748b',
-    border: 'none',
-    fontSize: 14,
-    padding: '4px 6px',
+    padding: '6px',
+    display: 'flex',
+    alignItems: 'center',
     cursor: 'pointer'
   },
-  discoverSection: {
+  deleteTrackBtn: {
+    background: 'transparent',
+    border: 'none',
+    color: '#64748b',
+    fontSize: 13,
+    padding: '6px',
+    cursor: 'pointer'
+  },
+  discoverWrap: {
     display: 'flex',
     flexDirection: 'column',
     gap: 10
   },
-  moodScroll: {
+  moodRow: {
     display: 'flex',
     gap: 6,
     overflowX: 'auto',
     paddingBottom: 4
   },
-  moodPill: {
-    background: 'rgba(255,255,255,0.05)',
-    border: '1px solid rgba(255,255,255,0.08)',
+  moodChip: {
+    background: 'rgba(255, 255, 255, 0.05)',
+    border: '1px solid rgba(255, 255, 255, 0.09)',
     color: '#cbd5e1',
-    padding: '7px 12px',
+    padding: '7px 13px',
     borderRadius: 999,
     fontSize: 12,
     fontWeight: 600,
     whiteSpace: 'nowrap',
     cursor: 'pointer'
   },
-  moodPillActive: {
-    background: '#7c3aed',
-    borderColor: '#a855f7',
-    color: '#fff'
+  moodChipActive: {
+    background: 'linear-gradient(135deg, #a855f7, #ec4899)',
+    borderColor: 'transparent',
+    color: '#ffffff'
+  },
+  recSubHeader: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    fontSize: 11.5,
+    color: '#94a3b8',
+    padding: '0 4px'
+  },
+  refreshRecBtn: {
+    background: 'rgba(255, 255, 255, 0.08)',
+    border: 'none',
+    color: '#f1f5f9',
+    fontSize: 11,
+    fontWeight: 700,
+    padding: '5px 10px',
+    borderRadius: 8,
+    cursor: 'pointer'
   }
 };
