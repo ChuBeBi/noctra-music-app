@@ -1,11 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-/**
- * Tự động chọn đường dẫn API thông minh:
- * - Nếu người dùng mở qua địa chỉ IP mạng LAN (192.168.x.x / 10.x.x.x / localhost) ở cổng 5173 -> kết nối thẳng cổng 5000.
- * - Nếu người dùng mở qua 5G / Tunnel / Domain (ngrok, cloudflare, devtunnels, hosting) -> đi qua '/api' (Vite proxy)
- *   để iPhone dùng 5G không bị lỗi từ chối kết nối cổng 5000!
- */
 function resolveApiBase() {
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL.replace(/\/$/, '');
@@ -135,7 +129,6 @@ export default function App() {
   const trackPrefetchedNextRef = useRef(false);
   const lastPositionUpdateRef = useRef(0);
   const isSeekingRef = useRef(false);
-  // Bộ đếm chặn lỗi tự nhảy bài dây chuyền nếu người dùng mất mạng đột ngột
   const consecutiveErrorCountRef = useRef(0);
 
   songsRef.current = songs;
@@ -165,10 +158,11 @@ export default function App() {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
+  // Thêm tham số ?v=7 để xóa sạch mọi cache 29s cũ trong trình duyệt Safari của iPhone!
   const getPlayableUrl = (song) => {
     if (!song) return '';
     const key = encodeURIComponent(song.youtubeId || song.id);
-    return `${API_BASE}/stream/${key}.m4a`;
+    return `${API_BASE}/stream/${key}.m4a?v=7`;
   };
 
   const activateIosPlaybackSession = () => {
@@ -185,12 +179,12 @@ export default function App() {
       navigator.mediaSession.metadata = new MediaMetadata({
         title: song.title || 'NOCTRA YouTube Music',
         artist: song.artist || 'YouTube Audio',
-        album: 'NOCTRA YouTube Stream',
+        album: 'NOCTRA YouTube Full Stream',
         artwork: [
           {
             src:
               song.thumbnail ||
-              `https://i.ytimg.com/vi/${song.youtubeId || 'lTRiuFIWV54'}/hqdefault.jpg`,
+              `https://i.ytimg.com/vi/${song.youtubeId || 'qGRU3sRbaYw'}/hqdefault.jpg`,
             sizes: '512x512',
             type: 'image/jpeg'
           }
@@ -243,7 +237,6 @@ export default function App() {
       const p = audio.play();
       if (p !== undefined) {
         p.then(() => {
-          // Chỉ bật trạng thái đang phát khi luồng thực sự chạy
           setIsPlaying(true);
           if ('mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
@@ -472,7 +465,6 @@ export default function App() {
     const cur = audio.currentTime || 0;
     const dur = audio.duration && Number.isFinite(audio.duration) ? audio.duration : 0;
 
-    // Khi nhạc đã thực sự nhích qua giây 0.5 -> reset bộ đếm lỗi về 0 và tắt trạng thái loading
     if (cur > 0.5) {
       consecutiveErrorCountRef.current = 0;
     }
@@ -592,7 +584,7 @@ export default function App() {
     setSongs(newList);
 
     playSongImperatively(newSongObj, 0, true);
-    showToast(`Đang phát từ YouTube: ${newSongObj.title}`);
+    showToast(`Đang phát Full từ YouTube: ${newSongObj.title}`);
 
     fetch(`${API_BASE}/songs`, {
       method: 'POST',
@@ -630,7 +622,7 @@ export default function App() {
       playSongImperatively(added, 0, true);
       setOmniQuery('');
       setSearchResults([]);
-      showToast(`Đã phát từ YouTube: ${added.title}`);
+      showToast(`Đã phát Full từ YouTube: ${added.title}`);
       fetchRecommendations(selectedMood);
     } catch (err) {
       showToast(err.message);
@@ -680,7 +672,6 @@ export default function App() {
           setIsPlaying(true);
         }}
         onPlaying={() => {
-          // Chỉ tắt chữ "Đang giải mã..." khi thực sự có dữ liệu âm thanh phát ra
           setLoadingTrack(false);
           setIsPlaying(true);
           consecutiveErrorCountRef.current = 0;
@@ -701,13 +692,12 @@ export default function App() {
         onError={() => {
           setLoadingTrack(false);
           consecutiveErrorCountRef.current += 1;
-          // Chặn vòng lặp tự nhảy bài vô tận như trong video: chỉ thử sang 1 bài kế tiếp duy nhất
           if (consecutiveErrorCountRef.current <= 1 && songsRef.current.length > 1) {
-            showToast('Đang chuyển sang luồng dự phòng ổn định...');
+            showToast('Đang tải luồng Full dự phòng...');
             setTimeout(() => triggerNextTrackSync(true), 1200);
           } else {
             setIsPlaying(false);
-            showToast('Luồng này đang bận. Hãy chạm chọn bài khác hoặc tìm bài mới.');
+            showToast('Video này đang bận giải mã, hãy bấm ▶ một lần nữa.');
           }
         }}
         style={styles.hiddenHardwareAudio}
@@ -807,7 +797,7 @@ export default function App() {
           {searchResults.length > 0 && (
             <div style={styles.searchDropdown}>
               <div style={styles.dropdownHeader}>
-                <span>KẾT QUẢ TỪ YOUTUBE (CHẠM ĐỂ PHÁT NGAY)</span>
+                <span>KẾT QUẢ TỪ YOUTUBE (CHẠM ĐỂ PHÁT FULL BÀI)</span>
                 <button
                   type="button"
                   onClick={() => setSearchResults([])}
@@ -861,10 +851,10 @@ export default function App() {
                   <Icons.YouTube />
                   <span>
                     {loadingTrack
-                      ? 'Đang giải mã luồng YouTube...'
+                      ? 'Đang nạp Full bài hát từ YouTube...'
                       : isPlaying
-                        ? 'YouTube M4A • Khóa màn hình OK'
-                        : 'Đã sẵn sàng phát'}
+                        ? 'YouTube M4A Full • Khóa màn hình OK'
+                        : 'Đã sẵn sàng phát Full'}
                   </span>
                   {isPlaying && !loadingTrack && (
                     <div style={styles.eqBars}>

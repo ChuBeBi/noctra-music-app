@@ -1,6 +1,6 @@
 {
   "name": "noctra-music-app",
-  "version": "6.0.0",
+  "version": "7.0.0",
   "private": true,
   "scripts": {
     "install:all": "npm --prefix server install && npm --prefix client install",
