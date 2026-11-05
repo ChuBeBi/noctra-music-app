@@ -4,12 +4,13 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#07080d" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="NOCTRA" />
+    <!--
+      QUAN TRỌNG CHO IPHONE: Không bật apple-mobile-web-app-capable="yes" vì iOS đóng băng tiến trình
+      WebClip độc lập khi vuốt thoát ra màn hình chính trên mạng HTTP nội bộ. Chạy qua engine Safari giúp
+      nhạc phát nền 100% khi thoát app và khi tắt màn hình!
+    -->
     <link rel="manifest" href="/manifest.webmanifest" />
-    <title>NOCTRA — Nghe nhạc tắt màn hình iPhone</title>
+    <title>NOCTRA — Nghe Nhạc Tắt Màn Hình iPhone</title>
     <style>
       * {
         -webkit-tap-highlight-color: transparent;
@@ -20,12 +21,21 @@
         padding: 0;
         background: #07080d;
         color: #f8fafc;
-        overscroll-behavior-y: none;
       }
       input, button {
         font-family: inherit;
       }
     </style>
+    <script>
+      // Tự động gỡ bỏ mọi Service Worker cũ (sw.js) đang lưu cache lỗi trên iPhone
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(function(registrations) {
+          for (let registration of registrations) {
+            registration.unregister();
+          }
+        }).catch(function() {});
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>

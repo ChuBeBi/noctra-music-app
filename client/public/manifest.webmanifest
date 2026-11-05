@@ -3,20 +3,7 @@
   "short_name": "NOCTRA",
   "description": "Trình phát nhạc nền khi tắt màn hình iPhone",
   "start_url": "/",
-  "display": "standalone",
+  "display": "browser",
   "background_color": "#07080d",
-  "theme_color": "#07080d",
-  "orientation": "portrait",
-  "icons": [
-    {
-      "src": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=192&q=80",
-      "sizes": "192x192",
-      "type": "image/jpeg"
-    },
-    {
-      "src": "https://images.unsplash.com/photo-1511671782779-c97d3d27a1d4?w=512&q=80",
-      "sizes": "512x512",
-      "type": "image/jpeg"
-    }
-  ]
+  "theme_color": "#07080d"
 }

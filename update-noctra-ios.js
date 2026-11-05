@@ -36,45 +36,45 @@ const fs = require('fs');
 const path = require('path');
 
 function writeFileEnsured(relPath, content) {
-  const fullPath = path.resolve(process.cwd(), relPath);
-  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-  fs.writeFileSync(fullPath, content, 'utf8');
-  console.log(`[OK] Đã ghi đè thành công: ${relPath}`);
+    const fullPath = path.resolve(process.cwd(), relPath);
+    fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+    fs.writeFileSync(fullPath, content, 'utf8');
+    console.log(`[OK] Đã ghi đè thành công: ${relPath}`);
 }
 
 // ============================================================================
 // 1. ROOT PACKAGE.JSON & SERVER PACKAGE.JSON
 // ============================================================================
 const rootPackageJson = {
-  name: "noctra-music-app",
-  version: "4.0.0",
-  private: true,
-  scripts: {
-    "install:all": "npm --prefix server install && npm --prefix client install",
-    "build": "npm --prefix server install && npm --prefix client install && npm --prefix client run build",
-    "start": "node server/src/index.js",
-    "dev": "concurrently \"npm run server\" \"npm run client\"",
-    "server": "npm --prefix server run dev",
-    "client": "npm --prefix client run dev -- --host"
-  },
-  devDependencies: {
-    concurrently: "^9.1.2"
-  }
+    name: "noctra-music-app",
+    version: "4.0.0",
+    private: true,
+    scripts: {
+        "install:all": "npm --prefix server install && npm --prefix client install",
+        "build": "npm --prefix server install && npm --prefix client install && npm --prefix client run build",
+        "start": "node server/src/index.js",
+        "dev": "concurrently \"npm run server\" \"npm run client\"",
+        "server": "npm --prefix server run dev",
+        "client": "npm --prefix client run dev -- --host"
+    },
+    devDependencies: {
+        concurrently: "^9.1.2"
+    }
 };
 
 const serverPackageJson = {
-  name: "noctra-server",
-  version: "4.0.0",
-  private: true,
-  scripts: {
-    start: "node src/index.js",
-    dev: "node src/index.js"
-  },
-  dependencies: {
-    "@distube/ytdl-core": "^4.14.4",
-    cors: "^2.8.5",
-    express: "^4.21.1"
-  }
+    name: "noctra-server",
+    version: "4.0.0",
+    private: true,
+    scripts: {
+        start: "node src/index.js",
+        dev: "node src/index.js"
+    },
+    dependencies: {
+        "@distube/ytdl-core": "^4.14.4",
+        cors: "^2.8.5",
+        express: "^4.21.1"
+    }
 };
 
 // ============================================================================
@@ -1210,17 +1210,17 @@ const clientIndexHtml = `<!doctype html>
 `;
 
 const clientManifest = JSON.stringify(
-  {
-    name: "NOCTRA Music iOS",
-    short_name: "NOCTRA",
-    description: "Trình phát nhạc nền khi tắt màn hình iPhone",
-    start_url: "/",
-    display: "browser",
-    background_color: "#07080d",
-    theme_color: "#07080d"
-  },
-  null,
-  2
+    {
+        name: "NOCTRA Music iOS",
+        short_name: "NOCTRA",
+        description: "Trình phát nhạc nền khi tắt màn hình iPhone",
+        start_url: "/",
+        display: "browser",
+        background_color: "#07080d",
+        theme_color: "#07080d"
+    },
+    null,
+    2
 );
 
 const clientServiceWorkerUnregister = `self.addEventListener('install', () => self.skipWaiting());
