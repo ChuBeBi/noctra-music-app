@@ -1,12 +1,25 @@
 import React, { useEffect, useRef, useState } from 'react';
 
+/**
+ * Tự động chọn đường dẫn API thông minh:
+ * - Nếu người dùng mở qua địa chỉ IP mạng LAN (192.168.x.x / 10.x.x.x / localhost) ở cổng 5173 -> kết nối thẳng cổng 5000.
+ * - Nếu người dùng mở qua 5G / Tunnel / Domain (ngrok, cloudflare, devtunnels, hosting) -> đi qua '/api' (Vite proxy)
+ *   để iPhone dùng 5G không bị lỗi từ chối kết nối cổng 5000!
+ */
 function resolveApiBase() {
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL.replace(/\/$/, '');
   }
   if (typeof window !== 'undefined') {
     const { protocol, hostname, port } = window.location;
-    if (port === '5173' || port === '4173' || port === '3000') {
+    const isLanOrLocal =
+      hostname === 'localhost' ||
+      hostname === '127.0.0.1' ||
+      /^192\.168\./.test(hostname) ||
+      /^10\./.test(hostname) ||
+      /^172\.(1[6-9]|2\d|3[0-1])\./.test(hostname);
+
+    if (isLanOrLocal && (port === '5173' || port === '4173' || port === '3000')) {
       return `${protocol}//${hostname}:5000/api`;
     }
   }
@@ -26,7 +39,6 @@ const MOOD_FILTERS = [
   { id: 'usuk', label: '🌍 US-UK Hits' }
 ];
 
-// Hệ thống Vector SVG Icons sắc nét chuẩn iOS 18
 const Icons = {
   Play: () => (
     <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor">
@@ -90,25 +102,23 @@ export default function App() {
   const [loadingTrack, setLoadingTrack] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
 
-  const [activeTab, setActiveTab] = useState('library'); // 'library' | 'discover'
-  const [loopMode, setLoopMode] = useState('radio'); // 'radio' (tự phát tiếp nhạc hợp gu) | 'all' | 'one'
+  const [activeTab, setActiveTab] = useState('library');
+  const [loopMode, setLoopMode] = useState('radio');
   const [shuffle, setShuffle] = useState(false);
   const [playbackRate, setPlaybackRate] = useState(1);
   const [sleepMinutesLeft, setSleepMinutesLeft] = useState(0);
 
-  // Tìm kiếm & Đề xuất YouTube
   const [omniQuery, setOmniQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [selectedMood, setSelectedMood] = useState('all');
   const [recommendations, setRecommendations] = useState([]);
-  const [topTags, setTopTags] = useState(['vpop', 'lofi']);
+  const [topTags, setTopTags] = useState(['vpop', 'chill']);
   const [loadingRecs, setLoadingRecs] = useState(false);
 
   const isStandaloneWebClip =
     typeof window !== 'undefined' && Boolean(window.navigator?.standalone);
 
-  // Refs đồng bộ cho phần cứng iOS & DOM Refs cho thanh trượt 60fps (0% React Re-render)
   const audioRef = useRef(null);
   const progressInputRef = useRef(null);
   const progressFillRef = useRef(null);
@@ -125,6 +135,8 @@ export default function App() {
   const trackPrefetchedNextRef = useRef(false);
   const lastPositionUpdateRef = useRef(0);
   const isSeekingRef = useRef(false);
+  // Bộ đếm chặn lỗi tự nhảy bài dây chuyền nếu người dùng mất mạng đột ngột
+  const consecutiveErrorCountRef = useRef(0);
 
   songsRef.current = songs;
   currentIndexRef.current = currentIndex;
@@ -138,7 +150,7 @@ export default function App() {
     setToastMsg(msg);
     setTimeout(() => {
       setToastMsg((prev) => (prev === msg ? '' : prev));
-    }, 3000);
+    }, 3200);
   };
 
   const formatTime = (sec) => {
@@ -194,10 +206,6 @@ export default function App() {
     fetch(`${API_BASE}/prefetch/${encodeURIComponent(key)}.m4a`).catch(() => {});
   };
 
-  /**
-   * PHÁT ĐỒNG BỘ 100% NGAY TRONG SỰ KIỆN (SYNCHRONOUS IMPERATIVE PLAYBACK):
-   * Giữ nguyên quyền phát nền phần cứng của iOS khi tắt màn hình hoặc vuốt thoát Safari.
-   */
   const playSongImperatively = (targetSong, targetIdx, autoPlay = true) => {
     const audio = audioRef.current;
     if (!audio || !targetSong) return;
@@ -217,7 +225,6 @@ export default function App() {
     setCurrentIndex(targetIdx);
     updateMediaSessionMetadata(targetSong);
 
-    // Reset thanh thời gian trên DOM
     if (progressInputRef.current) progressInputRef.current.value = 0;
     if (progressFillRef.current) progressFillRef.current.style.width = '0%';
     if (curTimeTextRef.current) curTimeTextRef.current.textContent = '0:00';
@@ -236,15 +243,15 @@ export default function App() {
       const p = audio.play();
       if (p !== undefined) {
         p.then(() => {
+          // Chỉ bật trạng thái đang phát khi luồng thực sự chạy
           setIsPlaying(true);
-          setLoadingTrack(false);
           if ('mediaSession' in navigator) {
             navigator.mediaSession.playbackState = 'playing';
           }
           sendTasteSignal(targetSong.id, 'play');
-        }).catch((err) => {
-          console.warn('iOS play warning:', err.message);
+        }).catch(() => {
           setLoadingTrack(false);
+          setIsPlaying(false);
         });
       }
     }
@@ -267,7 +274,7 @@ export default function App() {
         }
       })
       .catch(() => {
-        showToast('Đang kết nối tới NOCTRA YouTube Server...');
+        showToast('Đang kết nối tới NOCTRA Server...');
       });
 
     fetchRecommendations('all');
@@ -321,7 +328,6 @@ export default function App() {
       return;
     }
 
-    // Nếu đang ở cuối danh sách và bật Auto-Radio -> tự động nạp bài đề xuất YouTube hợp gu vào danh sách và phát luôn!
     if (
       idx === list.length - 1 &&
       loopModeRef.current === 'radio' &&
@@ -343,7 +349,6 @@ export default function App() {
       setSongs(updatedList);
       playSongImperatively(newSongObj, updatedList.length - 1, true);
 
-      // Đồng bộ ngầm lên server
       fetch(`${API_BASE}/songs`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -383,6 +388,7 @@ export default function App() {
     const song = list[currentIndexRef.current];
     if (!audio || !song) return;
 
+    consecutiveErrorCountRef.current = 0;
     activateIosPlaybackSession();
     if (!audio.src) {
       audio.src = getPlayableUrl(song);
@@ -392,13 +398,13 @@ export default function App() {
       .play()
       .then(() => {
         setIsPlaying(true);
-        setLoadingTrack(false);
         if ('mediaSession' in navigator) {
           navigator.mediaSession.playbackState = 'playing';
         }
       })
       .catch(() => {
         setLoadingTrack(false);
+        setIsPlaying(false);
       });
   };
 
@@ -407,6 +413,7 @@ export default function App() {
     if (!audio) return;
     audio.pause();
     setIsPlaying(false);
+    setLoadingTrack(false);
     if ('mediaSession' in navigator) {
       navigator.mediaSession.playbackState = 'paused';
     }
@@ -458,17 +465,17 @@ export default function App() {
     }
   }, []);
 
-  /**
-   * CẬP NHẬT THANH TRƯỢT & THỜI GIAN BẰNG DOM REF TRỰC TIẾP (60FPS, 0% REACT RE-RENDER):
-   * Khi màn hình iPhone tắt (document.hidden === true), hoàn toàn không tốn CPU render giao diện,
-   * đồng thời tự động nạp trước bài kế tiếp khi phát tới 80% thời lượng!
-   */
   const handleTimeUpdate = () => {
     const audio = audioRef.current;
     if (!audio) return;
 
     const cur = audio.currentTime || 0;
     const dur = audio.duration && Number.isFinite(audio.duration) ? audio.duration : 0;
+
+    // Khi nhạc đã thực sự nhích qua giây 0.5 -> reset bộ đếm lỗi về 0 và tắt trạng thái loading
+    if (cur > 0.5) {
+      consecutiveErrorCountRef.current = 0;
+    }
 
     if (!document.hidden && !isSeekingRef.current) {
       if (curTimeTextRef.current) {
@@ -496,7 +503,6 @@ export default function App() {
         sendTasteSignal(activeSong.id, 'complete');
       }
 
-      // Khi phát được 80% bài, nạp sẵn bài tiếp theo vào RAM để chuyển bài lúc tắt màn hình đạt 0ms
       if (!trackPrefetchedNextRef.current && cur / dur > 0.8) {
         trackPrefetchedNextRef.current = true;
         const list = songsRef.current;
@@ -542,7 +548,6 @@ export default function App() {
     return () => clearInterval(timer);
   }, [sleepMinutesLeft]);
 
-  // Tìm kiếm trực tiếp trên YouTube khi gõ
   useEffect(() => {
     const trimmed = omniQuery.trim();
     if (!trimmed || /^https?:\/\//i.test(trimmed) || /^[a-zA-Z0-9_-]{11}$/.test(trimmed)) {
@@ -563,8 +568,8 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [omniQuery]);
 
-  // Khi người dùng chạm vào 1 bài từ Kết quả Tìm kiếm YouTube hoặc Đề xuất YouTube -> Phát đồng bộ ngay lập tức!
   const handleQuickPlayYouTubeTrack = (track) => {
+    consecutiveErrorCountRef.current = 0;
     activateIosPlaybackSession();
 
     const newSongObj = {
@@ -586,11 +591,9 @@ export default function App() {
     songsRef.current = newList;
     setSongs(newList);
 
-    // Gọi phát đồng bộ ngay trong cùng xung nhịp chạm tay để iOS cấp quyền khóa màn hình 100%!
     playSongImperatively(newSongObj, 0, true);
     showToast(`Đang phát từ YouTube: ${newSongObj.title}`);
 
-    // Lưu ngầm vào thư viện trên Server
     fetch(`${API_BASE}/songs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -604,6 +607,7 @@ export default function App() {
     e.preventDefault();
     const raw = omniQuery.trim();
     if (!raw) return;
+    consecutiveErrorCountRef.current = 0;
     activateIosPlaybackSession();
 
     if (audioRef.current) {
@@ -664,10 +668,6 @@ export default function App() {
 
   return (
     <div style={styles.page}>
-      {/*
-        Thẻ <audio> phần cứng kích thước 1x1px (không dùng display:none để iOS giữ quyền phát nền,
-        và hoàn toàn ẩn khỏi mắt người dùng để giao diện sang trọng 100%).
-      */}
       <audio
         ref={audioRef}
         playsInline
@@ -678,7 +678,12 @@ export default function App() {
         onPlay={() => {
           activateIosPlaybackSession();
           setIsPlaying(true);
+        }}
+        onPlaying={() => {
+          // Chỉ tắt chữ "Đang giải mã..." khi thực sự có dữ liệu âm thanh phát ra
           setLoadingTrack(false);
+          setIsPlaying(true);
+          consecutiveErrorCountRef.current = 0;
           if (songsRef.current[currentIndexRef.current]) {
             updateMediaSessionMetadata(songsRef.current[currentIndexRef.current]);
           }
@@ -693,17 +698,21 @@ export default function App() {
           }
         }}
         onWaiting={() => setLoadingTrack(true)}
-        onPlaying={() => setLoadingTrack(false)}
         onError={() => {
           setLoadingTrack(false);
-          if (songsRef.current.length > 1) {
-            setTimeout(() => triggerNextTrackSync(true), 600);
+          consecutiveErrorCountRef.current += 1;
+          // Chặn vòng lặp tự nhảy bài vô tận như trong video: chỉ thử sang 1 bài kế tiếp duy nhất
+          if (consecutiveErrorCountRef.current <= 1 && songsRef.current.length > 1) {
+            showToast('Đang chuyển sang luồng dự phòng ổn định...');
+            setTimeout(() => triggerNextTrackSync(true), 1200);
+          } else {
+            setIsPlaying(false);
+            showToast('Luồng này đang bận. Hãy chạm chọn bài khác hoặc tìm bài mới.');
           }
         }}
         style={styles.hiddenHardwareAudio}
       />
 
-      {/* Ánh sáng Aura chuyển màu động theo ảnh bìa YouTube */}
       {currentSong?.thumbnail && (
         <>
           <div
@@ -728,7 +737,6 @@ export default function App() {
           </div>
         )}
 
-        {/* TOP BAR SANG TRỌNG */}
         <header style={styles.topNav}>
           <div style={styles.brandGroup}>
             <div style={styles.logoMark}>
@@ -755,7 +763,6 @@ export default function App() {
 
         {toastMsg && <div style={styles.toast}>{toastMsg}</div>}
 
-        {/* THANH TÌM KIẾM YOUTUBE TRỰC TIẾP (OMNI SEARCH BAR) */}
         <section style={styles.searchWrapper}>
           <form onSubmit={handleOmniSubmit} style={styles.searchBox}>
             <span style={styles.searchIconWrap}>
@@ -838,7 +845,6 @@ export default function App() {
           )}
         </section>
 
-        {/* HERO NOW-PLAYING CARD (CHUẨN APPLE MUSIC / SPOTIFY LUXURY) */}
         {currentSong && (
           <section style={styles.heroCard}>
             <div style={styles.artworkShowcase}>
@@ -848,10 +854,9 @@ export default function App() {
                   alt={currentSong.title}
                   style={{
                     ...styles.heroArtwork,
-                    transform: isPlaying ? 'scale(1.02)' : 'scale(0.96)'
+                    transform: isPlaying && !loadingTrack ? 'scale(1.02)' : 'scale(0.97)'
                   }}
                 />
-                {/* Sóng nhạc Equalizer động khi đang phát */}
                 <div style={styles.liveStatusOverlay}>
                   <Icons.YouTube />
                   <span>
@@ -859,7 +864,7 @@ export default function App() {
                       ? 'Đang giải mã luồng YouTube...'
                       : isPlaying
                         ? 'YouTube M4A • Khóa màn hình OK'
-                        : ' Đã sẵn sàng'}
+                        : 'Đã sẵn sàng phát'}
                   </span>
                   {isPlaying && !loadingTrack && (
                     <div style={styles.eqBars}>
@@ -887,7 +892,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* THANH TRƯỢT TUA NHẠC NEON (CUSTOM GLOW SEEK BAR) */}
             <div style={styles.seekSection}>
               <div style={styles.seekTrackBg}>
                 <div ref={progressFillRef} style={styles.seekTrackFill} />
@@ -935,7 +939,6 @@ export default function App() {
               </div>
             </div>
 
-            {/* CỤM ĐIỀU KHIỂN CHÍNH (LUXURY VECTOR CONTROLS) */}
             <div style={styles.mainControlsRow}>
               <button
                 type="button"
@@ -954,7 +957,10 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={triggerPrevTrackSync}
+                onClick={() => {
+                  consecutiveErrorCountRef.current = 0;
+                  triggerPrevTrackSync();
+                }}
                 style={styles.skipControlBtn}
               >
                 <Icons.Prev />
@@ -963,6 +969,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
+                  consecutiveErrorCountRef.current = 0;
                   if (isPlaying) {
                     pauseCurrentSync();
                   } else {
@@ -977,7 +984,10 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => triggerNextTrackSync(false)}
+                onClick={() => {
+                  consecutiveErrorCountRef.current = 0;
+                  triggerNextTrackSync(false);
+                }}
                 style={styles.skipControlBtn}
               >
                 <Icons.Next />
@@ -1006,7 +1016,6 @@ export default function App() {
               </button>
             </div>
 
-            {/* THANH TIỆN ÍCH PHỤ */}
             <div style={styles.quickActionRow}>
               <button
                 type="button"
@@ -1054,7 +1063,6 @@ export default function App() {
           </section>
         )}
 
-        {/* CHUYỂN TAB: DANH SÁCH PHÁT & KHÁM PHÁ YOUTUBE THEO GU */}
         <div style={styles.segmentedControl}>
           <button
             type="button"
@@ -1070,7 +1078,7 @@ export default function App() {
             type="button"
             onClick={() => {
               setActiveTab('discover');
-              fetchRecommendations(selectedMood);
+              if (recommendations.length === 0) fetchRecommendations(selectedMood);
             }}
             style={{
               ...styles.segmentBtn,
@@ -1081,7 +1089,6 @@ export default function App() {
           </button>
         </div>
 
-        {/* DANH SÁCH BÀI HÁT TRONG THƯ VIỆN */}
         {activeTab === 'library' && (
           <section style={styles.trackList}>
             {songs.map((song, idx) => {
@@ -1090,6 +1097,7 @@ export default function App() {
                 <div
                   key={song.id || song.youtubeId}
                   onClick={() => {
+                    consecutiveErrorCountRef.current = 0;
                     if (active) {
                       if (isPlaying) pauseCurrentSync();
                       else playSongImperatively(song, idx, true);
@@ -1148,7 +1156,6 @@ export default function App() {
           </section>
         )}
 
-        {/* KHÁM PHÁ YOUTUBE THEO GU NGƯỜI DÙNG */}
         {activeTab === 'discover' && (
           <section style={styles.discoverWrap}>
             <div style={styles.moodRow}>
