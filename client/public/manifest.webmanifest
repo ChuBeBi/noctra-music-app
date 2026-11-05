@@ -1,9 +1,22 @@
 {
-  "name": "NOCTRA YouTube Music",
+  "name": "NOCTRA Music — YouTube Pro",
   "short_name": "NOCTRA",
-  "description": "Nghe nhạc YouTube tắt màn hình trên iPhone",
+  "description": "Nghe nhạc YouTube nền khi tắt màn hình iPhone",
   "start_url": "/",
-  "display": "browser",
+  "scope": "/",
+  "display": "standalone",
   "background_color": "#050508",
-  "theme_color": "#050508"
+  "theme_color": "#050508",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect width='192' height='192' rx='42' fill='%23050508'/><circle cx='96' cy='96' r='64' fill='%238b5cf6'/><polygon points='86,72 124,96 86,120' fill='%23ffffff'/></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' rx='110' fill='%23050508'/><circle cx='256' cy='256' r='170' fill='%238b5cf6'/><polygon points='230,192 332,256 230,320' fill='%23ffffff'/></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml"
+    }
+  ]
 }

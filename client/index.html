@@ -4,80 +4,15 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#050508" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="NOCTRA" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="description" content="Trình phát nhạc YouTube cao cấp hỗ trợ nghe nhạc khi tắt màn hình iPhone (Lock-Screen Playback)" />
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%23050508' stroke='%23a855f7' stroke-width='6'/><circle cx='50' cy='50' r='20' fill='%23a855f7'/><polygon points='45,38 65,50 45,62' fill='%23ffffff'/></svg>" />
+    <link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 180 180'><rect width='180' height='180' rx='40' fill='%23050508'/><circle cx='90' cy='90' r='60' fill='%237c3aed'/><polygon points='80,68 115,90 80,112' fill='%23ffffff'/></svg>" />
     <link rel="manifest" href="/manifest.webmanifest" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
-    <title>NOCTRA — YouTube Music Streamer for iPhone</title>
-    <style>
-      * {
-        -webkit-tap-highlight-color: transparent;
-        box-sizing: border-box;
-      }
-      html, body {
-        margin: 0;
-        padding: 0;
-        background: #050508;
-        color: #f8fafc;
-        font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-        overscroll-behavior-y: none;
-      }
-      input, button {
-        font-family: inherit;
-      }
-      ::-webkit-scrollbar {
-        width: 0px;
-        height: 0px;
-      }
-      @keyframes eqBar1 {
-        0%, 100% { height: 5px; }
-        50% { height: 18px; }
-      }
-      @keyframes eqBar2 {
-        0%, 100% { height: 16px; }
-        40% { height: 5px; }
-        80% { height: 20px; }
-      }
-      @keyframes eqBar3 {
-        0%, 100% { height: 8px; }
-        60% { height: 19px; }
-      }
-      .noctra-range {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 100%;
-        height: 6px;
-        background: transparent;
-        outline: none;
-        margin: 0;
-        cursor: pointer;
-        position: relative;
-        z-index: 3;
-      }
-      .noctra-range::-webkit-slider-thumb {
-        -webkit-appearance: none;
-        appearance: none;
-        width: 16px;
-        height: 16px;
-        border-radius: 50%;
-        background: #ffffff;
-        box-shadow: 0 0 12px rgba(168, 85, 247, 0.9);
-        cursor: pointer;
-        transition: transform 0.15s ease;
-      }
-      .noctra-range:active::-webkit-slider-thumb {
-        transform: scale(1.3);
-      }
-    </style>
-    <script>
-      if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.getRegistrations().then(function(registrations) {
-          for (let registration of registrations) {
-            registration.unregister();
-          }
-        }).catch(function() {});
-      }
-    </script>
+    <title>NOCTRA — YouTube Music</title>
   </head>
   <body>
     <div id="root"></div>

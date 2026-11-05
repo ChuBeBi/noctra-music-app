@@ -158,11 +158,11 @@ export default function App() {
     return `${mins}:${secs < 10 ? '0' : ''}${secs}`;
   };
 
-  // Thêm tham số ?v=7 để xóa sạch mọi cache 29s cũ trong trình duyệt Safari của iPhone!
+  // Thêm tham số ?v=8 để xóa sạch mọi cache 29s cũ trong trình duyệt Safari của iPhone!
   const getPlayableUrl = (song) => {
     if (!song) return '';
     const key = encodeURIComponent(song.youtubeId || song.id);
-    return `${API_BASE}/stream/${key}.m4a?v=7`;
+    return `${API_BASE}/stream/${key}.m4a?v=8`;
   };
 
   const activateIosPlaybackSession = () => {
@@ -262,8 +262,7 @@ export default function App() {
             audioRef.current.src = getPlayableUrl(data[0]);
             updateMediaSessionMetadata(data[0]);
           }
-          if (data[0]) prefetchSong(data[0]);
-          if (data[1]) prefetchSong(data[1]);
+          // Tối ưu v8: Không bắn prefetch ồ ạt khi tải web
         }
       })
       .catch(() => {
@@ -282,7 +281,7 @@ export default function App() {
         if (data?.items) {
           setRecommendations(data.items);
           recommendationsRef.current = data.items;
-          if (data.items[0]) prefetchSong(data.items[0]);
+          // Tối ưu v8: Không bắn prefetch gợi ý ồ ạt
         }
         if (data?.topTags) setTopTags(data.topTags);
       })
@@ -689,15 +688,16 @@ export default function App() {
           }
         }}
         onWaiting={() => setLoadingTrack(true)}
+        onCanPlay={() => setLoadingTrack(false)}
         onError={() => {
           setLoadingTrack(false);
           consecutiveErrorCountRef.current += 1;
           if (consecutiveErrorCountRef.current <= 1 && songsRef.current.length > 1) {
-            showToast('Đang tải luồng Full dự phòng...');
-            setTimeout(() => triggerNextTrackSync(true), 1200);
+            showToast('Đang chuyển sang bài tiếp theo...');
+            setTimeout(() => triggerNextTrackSync(true), 1000);
           } else {
             setIsPlaying(false);
-            showToast('Video này đang bận giải mã, hãy bấm ▶ một lần nữa.');
+            showToast('Bài hát này hiện chưa thể phát trực tiếp, hãy chọn bài khác.');
           }
         }}
         style={styles.hiddenHardwareAudio}
